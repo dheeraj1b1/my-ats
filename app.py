@@ -30,15 +30,26 @@ st.title("My Personal ATS Matcher")
 
 # --- SECURE CREDENTIALS SECTION ---
 st.header("🔑 Secure Credentials")
-st.markdown("Your keys are safely kept in your browser session.")
-api_key = st.text_input("1. Enter your Gemini API Key", type="password")
+st.markdown("Your keys are safely loaded from your secure secrets.")
+
+# Safely attempt to load secrets (works locally and in Streamlit Cloud)
+try:
+    default_api = st.secrets["GEMINI_API_KEY"]
+    default_token = st.secrets["AIRTABLE_TOKEN"]
+except Exception:
+    default_api = ""
+    default_token = ""
+
+api_key = st.text_input("1. Enter your Gemini API Key",
+                        value=default_api, type="password")
 airtable_base_id = st.text_input(
     "2. Enter Airtable Base ID",
     value="appABPMwKgXkr8Rgn",
     type="default"
 )
 airtable_token = st.text_input(
-    "3. Enter Airtable Personal Access Token (starts with pat...)",
+    "3. Enter Airtable Personal Access Token",
+    value=default_token,
     type="password"
 )
 
