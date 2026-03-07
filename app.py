@@ -34,7 +34,7 @@ st.header("🔑 Secure Credentials")
 # 1. Gemini API Key
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.success("✅ Gemini API Key securely loaded from backend (Hidden)")
+    st.success("✅ Gemini API Key securely loaded from backend secrets")
 else:
     api_key = st.text_input("1. Enter your Gemini API Key", type="password")
     st.warning("⚠️ API Key not found in secrets. Please enter it manually.")
@@ -48,7 +48,7 @@ airtable_base_id = st.text_input(
 # 3. Airtable Token
 if "AIRTABLE_TOKEN" in st.secrets:
     airtable_token = st.secrets["AIRTABLE_TOKEN"]
-    st.success("✅ Airtable Token securely loaded from backend (Hidden)")
+    st.success("✅ Airtable Token securely loaded from backend secrets")
 else:
     airtable_token = st.text_input(
         "3. Enter Airtable Personal Access Token", type="password")
