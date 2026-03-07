@@ -30,28 +30,29 @@ st.title("My Personal ATS Matcher")
 
 # --- SECURE CREDENTIALS SECTION ---
 st.header("🔑 Secure Credentials")
-st.markdown("Your keys are safely loaded from your secure secrets.")
 
-# Safely attempt to load secrets (works locally and in Streamlit Cloud)
-try:
-    default_api = st.secrets["GEMINI_API_KEY"]
-    default_token = st.secrets["AIRTABLE_TOKEN"]
-except Exception:
-    default_api = ""
-    default_token = ""
+# 1. Gemini API Key
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+    st.success("✅ Gemini API Key securely loaded from backend (Hidden)")
+else:
+    api_key = st.text_input("1. Enter your Gemini API Key", type="password")
+    st.warning("⚠️ API Key not found in secrets. Please enter it manually.")
 
-api_key = st.text_input("1. Enter your Gemini API Key",
-                        value=default_api, type="password")
+# 2. Airtable Base ID (This is just an ID, not a password, so it's safe to show)
 airtable_base_id = st.text_input(
     "2. Enter Airtable Base ID",
-    value="appABPMwKgXkr8Rgn",
-    type="default"
+    value="appABPMwKgXkr8Rgn"
 )
-airtable_token = st.text_input(
-    "3. Enter Airtable Personal Access Token",
-    value=default_token,
-    type="password"
-)
+
+# 3. Airtable Token
+if "AIRTABLE_TOKEN" in st.secrets:
+    airtable_token = st.secrets["AIRTABLE_TOKEN"]
+    st.success("✅ Airtable Token securely loaded from backend (Hidden)")
+else:
+    airtable_token = st.text_input(
+        "3. Enter Airtable Personal Access Token", type="password")
+    st.warning("⚠️ Airtable Token not found in secrets. Please enter it manually.")
 
 # --- 1. Application Details Section ---
 st.header("1. Application Details")
