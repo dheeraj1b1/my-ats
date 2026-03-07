@@ -163,7 +163,8 @@ if st.button("Scan & Match"):
                     "role": extracted_role,
                     "jd": jd_text,
                     "score": match_score,
-                    "date": exact_time
+                    "date": exact_time,
+                    "resume_name": uploaded_file.name
                 }
 
             except Exception as e:
@@ -206,7 +207,8 @@ if 'last_scan' in st.session_state:
                     "Match Score": scan_data['score'],
                     "Status": "Not Applied",
                     "Applied Date": scan_data['date'],
-                    "JD Description": scan_data['jd']
+                    "JD Description": scan_data['jd'],
+                    "Resume Name": scan_data.get('resume_name', 'Unknown')
                 }
             }
 
