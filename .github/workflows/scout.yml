@@ -1,0 +1,31 @@
+name: 🔍 Automated Job Scout
+
+on:
+  schedule:
+    # Runs every 12 hours (midnight and noon UTC)
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+    # Allows manual trigger from the GitHub Actions UI
+
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    name: Scout LinkedIn → Score with AI → Push to Airtable
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: pip install -r scout_requirements.txt
+
+      - name: 🚀 Run Scout Pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+        run: python scout.py

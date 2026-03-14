@@ -1,0 +1,61 @@
+[Paste your resume text here]
+DHEERAJ B 
++91-9148577548 |  dheeraj474@gmail.com |  Mysore, KA 
+LinkedIn: linkedin.com/in/dheerajbme |  GitHub: github.com/dheeraj1b1 |  Portfolio: dheeraj1b1.github.io/ 
+PROFESSIONAL SUMMARY 
+QA / QE Automation Engineer / SDET with 4 years of experience in automation and manual testing, specializing across BFSI services 
+and product-based environments. Proficient in building robust automation frameworks using Selenium, TestNG, and REST Assured 
+for Web Services validation. Strong understanding of SDLC, STLC, and Agile/Scrum methodologies to support continuous delivery and 
+quality transformation. Skilled in CI/CD integration using Jenkins and Harness, along with performance validation using JMeter. 
+Experienced in distributed test environments and service virtualization to maintain consistent software stability. Actively leveraging 
+Generative AI–assisted tools to optimize QA workflows, accelerate test development, improve root-cause analysis, and enhance overall 
+testing productivity. 
+EXPERIENCE 
+Infosys Ltd (Client: NAB) 
+SDET / QA Automation Engineer 
+Feb 2022 – Present 
+Mysore, KA 
+• Orchestrated QA strategy for microservices-based backend systems within BFSI platforms, leading end-to-end test planning, 
+execution, and regression sign-off, ensuring 99% release stability with zero major post-production defects. 
+• Designed a unified ST + Integration automation pipeline, reducing regression effort by 90% and accelerating release readiness. 
+• Built REST Assured API frameworks achieving 90% functional and integration coverage, cutting manual effort by 40% and 
+regression cycles by 60%. 
+• Integrated UI, API, and integration test suites into Jenkins and Harness CI/CD pipelines, enabling parallel execution and reducing 
+bug-fix turnaround time by 30%. 
+• Identified and resolved performance bottlenecks using JMeter and Splunk, achieving 45% lower latency, 80% faster response times, 
+and 35% improved throughput under load. 
+• Engineered and stabilized Dockerized test environments in collaboration with DevOps teams, improving environment scalability and 
+execution consistency by up to 40%. 
+• Orchestrated end-to-end QA architecture for microservices-based BFSI platforms, covering UI, API, integration, and backend data 
+validation across multiple environments. 
+• Architected scalable automation execution strategies leveraging Jenkins, Harness, and GitHub Actions, enabling scheduled, parallel, 
+and environment-specific test runs with faster feedback cycles. 
+• Leveraged AI-assisted engineering tools (Cursor AI, Amazon Q, Microsoft Copilot) for test scenario generation, script refactoring, SQL 
+preparation, defect analysis, and documentation. 
+• Worked closely with developers, product owners, and business stakeholders to review requirements, validate acceptance criteria, and 
+ensure end-to-end quality across releases in an Agile delivery model. 
+PROJECTS 
+Hybrid E2E QA Automation Framework (UI + API + DB) (Repo) 
+• Architected and built a production-grade hybrid QA automation framework from scratch covering UI, API, and database 
+validation using Java, Selenium, TestNG, and REST Assured. 
+• Orchestrated end-to-end automation workflows including UI journeys, API chaining, and backend data validation, reducing overall 
+regression effort by ~90%. 
+• Designed extensible framework components using Page Object Model (POM), Singleton patterns, and centralized configuration, 
+ensuring scalability, reusability, and maintainability. 
+• Integrated the framework with Jenkins, GitHub Actions, and AWS EC2 to enable CI/CD-based execution, scheduled runs, and 
+automated quality gates. 
+SKILLS 
+Key Skills: Selenium WebDriver, Java, REST Assured, API Testing, TestNG, Jenkins, GitHub Actions, CI/CD, Docker, JMeter, SQL 
+Operating Systems: Windows, Ubuntu 
+Languages: Core Java, Python (Basic) 
+Frameworks & Technologies: Selenium WebDriver, TestNG, REST Assured, Cucumber (BDD), Page Object Model (POM), 
+WebDriverManager, XPath, Playwright (Basic) 
+Testing Processes: Automation Testing, Manual Testing, API/Web Services Testing, Regression Testing, System Testing (ST), System 
+Integration Testing (SIT), Performance Testing (PT/PE), Service Virtualization (SV), Agile (Scrum), SDLC, STLC 
+Tools, CI/CD & AI: Git, Jenkins, Docker, Harness, Gradle, Maven, NodeJS, JMeter, LoadRunner, Postman, Swagger, JIRA, Confluence, 
+TestRail, Bugzilla, Amazon Q, Microsoft Copilot, Cursor AI, IntelliJ, VS Code, DBeaver, Qtest, Artifactory 
+Databases & Cloud: MySQL, PostgreSQL, AWS EC2, AWS CloudWatch, AWS RDS, Splunk, Kafka, OpenSearch, GitHub Actions 
+EDUCATION 
+Jain University  
+Master of Business Administration (MBA) | Banking & Finance  
+CGPA: 8.7 
