@@ -1,11 +1,10 @@
 """
-scout.py — Automated LinkedIn Job Scout Pipeline (Local ATS Engine)
-====================================================================
-Scrapes LinkedIn public job board for QA/SDET roles,
-scores each JD using a local skill-matching ATS engine,
-checks for duplicates in Airtable, and pushes qualifying jobs.
+scout.py — Automated LinkedIn Job Scout Pipeline (Two-Tier ATS)
+================================================================
+Tier 1: Local keyword bouncer (Primary/Secondary skill matching, >= 50)
+Tier 2: Gemini AI deep scan (contextual JD vs Resume scoring, >= 80)
 
-No external AI APIs required. Runs headlessly via GitHub Actions.
+Scrapes LinkedIn → Dedup via Airtable → Tier 1 → Tier 2 → Push to Airtable.
 """
 
 import os
@@ -15,13 +14,16 @@ import datetime
 import urllib.parse
 import requests
 from bs4 import BeautifulSoup
+import google.generativeai as genai
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 SEARCH_KEYWORDS = "QA Automation OR SDET"
 TARGET_CITIES = ["Bangalore", "Chennai", "Hyderabad"]
-MAX_JOBS = 50
-SCORE_THRESHOLD = 80
+MAX_JOBS = 60
+TIER1_THRESHOLD = 50   # Local keyword bouncer
+TIER2_THRESHOLD = 80   # Gemini AI deep scan
+GEMINI_SLEEP = 30      # Seconds to sleep before each Gemini call (rate limit)
 
 AIRTABLE_BASE_ID = "appABPMwKgXkr8Rgn"
 AIRTABLE_TABLE_NAME = "Applications"
@@ -42,25 +44,13 @@ HEADERS = {
 
 # ─── Skill Definitions ──────────────────────────────────────────────────────
 
-# Primary Core Skills — 10 points each (max 100 from these alone)
 PRIMARY_SKILLS = [
-    "Java",
-    "Selenium",
-    "REST Assured",
-    "TestNG",
-    "API Testing",
-    "CI/CD",
-    "Jenkins",
-    "Microservices",
-    "JMeter",
-    "SQL",
+    "Java", "Selenium", "REST Assured", "TestNG", "API Testing",
+    "CI/CD", "Jenkins", "Microservices", "JMeter", "SQL",
 ]
 
-# Secondary Skills — 2 points each
 SECONDARY_SKILLS = [
-    "Python",
-    "Playwright",
-    "Appium",
+    "Python", "Playwright", "Appium",
 ]
 
 
@@ -128,7 +118,6 @@ def scrape_linkedin_jobs():
         job_cards = soup.find_all("div", class_="base-card")
 
         if not job_cards:
-            # Fallback: try alternate selectors
             job_cards = soup.find_all("li", class_=re.compile(r"result-card"))
 
         print(f"   Found {len(job_cards)} job cards")
@@ -138,21 +127,18 @@ def scrape_linkedin_jobs():
                 break
 
             try:
-                # Extract job title
                 title_tag = (
                     card.find("h3", class_=re.compile(r"base-search-card__title"))
                     or card.find("h3")
                 )
                 title = title_tag.get_text(strip=True) if title_tag else "Unknown"
 
-                # Extract company name
                 company_tag = (
                     card.find("h4", class_=re.compile(r"base-search-card__subtitle"))
                     or card.find("a", class_=re.compile(r"hidden-nested-link"))
                 )
                 company = company_tag.get_text(strip=True) if company_tag else "Unknown"
 
-                # Extract apply link
                 link_tag = card.find("a", class_=re.compile(r"base-card__full-link"))
                 if not link_tag:
                     link_tag = card.find("a", href=True)
@@ -163,17 +149,16 @@ def scrape_linkedin_jobs():
                     "company": company,
                     "apply_link": apply_link,
                     "city": city,
-                    "description": "",  # Will be filled by scraping detail page
+                    "description": "",
                 })
 
             except Exception as e:
                 print(f"   ⚠️ Error parsing a job card: {e}")
                 continue
 
-        # Be polite between city requests
         time.sleep(2)
 
-    # Step 2b: Scrape individual job detail pages for full descriptions
+    # Fetch full descriptions
     print(f"\n📝 Fetching full descriptions for {len(all_jobs)} jobs...")
     for i, job in enumerate(all_jobs):
         if not job["apply_link"]:
@@ -205,19 +190,15 @@ def scrape_linkedin_jobs():
     return all_jobs
 
 
-# ─── Step 3: Local ATS Scoring Engine ───────────────────────────────────────
+# ─── Tier 1: Local Keyword Bouncer ──────────────────────────────────────────
 
 def calculate_ats_score(resume_text, jd_text):
     """
-    Calculate an ATS match score (0–100) for a Java/Selenium SDET.
+    Tier 1 — Local ATS scoring for Java/Selenium SDET.
 
-    Scoring:
-      - Primary Core Skills: 10 points each (max 100 from 10 skills)
-      - Secondary Skills:     2 points each (bonus on top)
-      - Final score capped at 100.
-
-    Both resume_text and jd_text are scanned case-insensitively.
-    A skill must appear in BOTH the resume AND the JD to earn points.
+    Primary Skills: 10 pts each | Secondary Skills: 2 pts each
+    A skill earns points only if it appears in BOTH the resume AND the JD.
+    Score capped at 100.
     """
     jd_lower = jd_text.lower()
     resume_lower = resume_text.lower()
@@ -226,38 +207,92 @@ def calculate_ats_score(resume_text, jd_text):
     matched_primary = []
     matched_secondary = []
 
-    # Score primary skills (10 pts each)
     for skill in PRIMARY_SKILLS:
-        skill_lower = skill.lower()
-        if skill_lower in jd_lower and skill_lower in resume_lower:
+        if skill.lower() in jd_lower and skill.lower() in resume_lower:
             score += 10
             matched_primary.append(skill)
 
-    # Score secondary skills (2 pts each)
     for skill in SECONDARY_SKILLS:
-        skill_lower = skill.lower()
-        if skill_lower in jd_lower and skill_lower in resume_lower:
+        if skill.lower() in jd_lower and skill.lower() in resume_lower:
             score += 2
             matched_secondary.append(skill)
 
-    # Cap at 100
     final_score = min(score, 100)
 
-    # Log breakdown
     if matched_primary or matched_secondary:
-        print(f"      Primary matches ({len(matched_primary)}): {', '.join(matched_primary) if matched_primary else 'None'}")
-        print(f"      Secondary matches ({len(matched_secondary)}): {', '.join(matched_secondary) if matched_secondary else 'None'}")
+        print(f"      Primary ({len(matched_primary)}): {', '.join(matched_primary) if matched_primary else 'None'}")
+        print(f"      Secondary ({len(matched_secondary)}): {', '.join(matched_secondary) if matched_secondary else 'None'}")
 
     return final_score
 
 
-# ─── Step 4: Airtable Duplicate Checker ─────────────────────────────────────
+# ─── Tier 2: Gemini AI Deep Scan ────────────────────────────────────────────
+
+def gemini_deep_scan(jd_text, resume_text, model):
+    """
+    Tier 2 — Send JD + Resume to Gemini for contextual ATS scoring.
+    Returns an integer score 0–100.
+
+    Includes a mandatory 30s sleep before the call and a 429 retry mechanism.
+    """
+    prompt = f"""You are a strict Applicant Tracking System (ATS).
+Compare the following Job Description against the Resume.
+Evaluate ONLY based on hard skills, tools, technologies, and years of experience.
+DO NOT assume skills. Only count skills explicitly mentioned in the resume.
+
+Return ONLY a single integer from 0 to 100 representing the match percentage.
+Do not return any other text, explanation, or formatting. Just the number.
+
+--- JOB DESCRIPTION ---
+{jd_text}
+
+--- RESUME ---
+{resume_text}
+"""
+
+    # CRITICAL: Sleep before every Gemini call to respect free tier RPM limits
+    print(f"      ⏳ Rate limit pause ({GEMINI_SLEEP}s)...", end="", flush=True)
+    time.sleep(GEMINI_SLEEP)
+    print(" done")
+
+    # First attempt
+    try:
+        response = model.generate_content(prompt)
+        score_text = response.text.strip()
+        match = re.search(r"\d+", score_text)
+        if match:
+            return min(int(match.group()), 100)
+        return 0
+
+    except Exception as e:
+        error_str = str(e)
+
+        # Handle 429 rate limit — wait 60s and retry once
+        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+            print(f"      ⚠️ Hit 429 rate limit. Sleeping 60s and retrying...")
+            time.sleep(60)
+            try:
+                response = model.generate_content(prompt)
+                score_text = response.text.strip()
+                match = re.search(r"\d+", score_text)
+                if match:
+                    return min(int(match.group()), 100)
+                return 0
+            except Exception as retry_err:
+                print(f"      ❌ Retry also failed: {retry_err}")
+                return 0
+        else:
+            print(f"      ❌ Gemini error: {e}")
+            return 0
+
+
+# ─── Airtable: Duplicate Checker ────────────────────────────────────────────
 
 def get_existing_jobs(airtable_token):
     """
     Fetch all existing records from Airtable Applications table.
-    Returns a set of Apply Link URLs that are already logged,
-    filtering for records with Status "Not Applied" (not yet acted on).
+    Returns a set of Apply Link URLs that are already logged
+    (Status: "Not Applied" or "Applied").
     """
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
@@ -287,11 +322,9 @@ def get_existing_jobs(airtable_token):
             apply_link = fields.get("Apply Link", "")
             status = fields.get("Status", "")
 
-            # Track jobs that are either "Not Applied" or already applied
             if apply_link and status in ("Not Applied", "Applied"):
                 existing_urls.add(apply_link)
 
-        # Airtable paginates with an offset token
         offset = data.get("offset")
         if not offset:
             break
@@ -300,7 +333,7 @@ def get_existing_jobs(airtable_token):
     return existing_urls
 
 
-# ─── Step 5: Airtable Push ──────────────────────────────────────────────────
+# ─── Airtable: Push ─────────────────────────────────────────────────────────
 
 def push_to_airtable(job, score, airtable_token):
     """POST a qualifying job to Airtable."""
@@ -323,7 +356,7 @@ def push_to_airtable(job, score, airtable_token):
     try:
         resp = requests.post(url, json=data, headers=headers, timeout=30)
         if resp.status_code == 200:
-            print(f"      ✅ Logged to Airtable: {job['title']} at {job['company']}")
+            print(f"      ✅ Logged to Airtable: {job['title']} at {job['company']} (AI Score: {score}%)")
         else:
             print(f"      ❌ Airtable error ({resp.status_code}): {resp.text[:200]}")
     except Exception as e:
@@ -334,17 +367,26 @@ def push_to_airtable(job, score, airtable_token):
 
 def main():
     print("=" * 60)
-    print("🚀 AUTOMATED JOB SCOUT PIPELINE (Local ATS Engine)")
+    print("🚀 TWO-TIER ATS JOB SCOUT PIPELINE")
     print(f"   Time: {datetime.datetime.now().isoformat()}")
-    print(f"   Threshold: {SCORE_THRESHOLD}%")
-    print(f"   Primary Skills: {len(PRIMARY_SKILLS)} × 10pts")
-    print(f"   Secondary Skills: {len(SECONDARY_SKILLS)} × 2pts")
+    print(f"   Max Jobs: {MAX_JOBS}")
+    print(f"   Tier 1 (Local): >= {TIER1_THRESHOLD}% to advance")
+    print(f"   Tier 2 (Gemini): >= {TIER2_THRESHOLD}% to push")
+    print(f"   Gemini sleep: {GEMINI_SLEEP}s per call")
     print("=" * 60)
 
-    # Load environment variable
+    # Load environment variables
+    gemini_api_key = os.environ.get("GEMINI_API_KEY")
     airtable_token = os.environ.get("AIRTABLE_TOKEN")
+
+    if not gemini_api_key:
+        raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
     if not airtable_token:
         raise EnvironmentError("AIRTABLE_TOKEN environment variable is not set.")
+
+    # Set up Gemini
+    genai.configure(api_key=gemini_api_key)
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     # Step 1: Read Resume
     resume_text = read_resume("resume.txt")
@@ -358,43 +400,61 @@ def main():
     # Step 3: Fetch existing Airtable records for deduplication
     existing_urls = get_existing_jobs(airtable_token)
 
-    # Step 4: Score and push
-    print("\n🤖 Scoring jobs with Local ATS Engine...")
-    print(f"   Primary: {', '.join(PRIMARY_SKILLS)}")
-    print(f"   Secondary: {', '.join(SECONDARY_SKILLS)}")
+    # Step 4: Two-Tier Scoring
+    print("\n" + "=" * 60)
+    print("🏗️  TWO-TIER SCORING")
+    print("=" * 60)
 
-    qualified_count = 0
-    skipped_dupes = 0
-    below_threshold = 0
+    stats = {
+        "total": len(jobs),
+        "duplicates": 0,
+        "tier1_fail": 0,
+        "tier2_fail": 0,
+        "pushed": 0,
+    }
 
     for i, job in enumerate(jobs):
-        print(f"\n   [{i+1}/{len(jobs)}] {job['title']} at {job['company']}...")
+        print(f"\n── [{i+1}/{len(jobs)}] {job['title']} at {job['company']} ({job['city']})")
 
-        # Duplicate check
+        # ── Dedup Check ──
         if job["apply_link"] in existing_urls:
-            print(f"      ⏭️ Skipping {job['company']} - Already logged")
-            skipped_dupes += 1
+            print(f"   ⏭️ Skipping {job['company']} - Already logged")
+            stats["duplicates"] += 1
             continue
 
-        # Score the job
-        score = calculate_ats_score(resume_text, job["description"])
-        print(f"      Score: {score}%", end="")
+        # ── Tier 1: Local Keyword Bouncer ──
+        print(f"   🔸 Tier 1 (Local Keyword Scan)...")
+        tier1_score = calculate_ats_score(resume_text, job["description"])
+        print(f"      Tier 1 Score: {tier1_score}%", end="")
 
-        if score >= SCORE_THRESHOLD:
-            print(f" ✅ QUALIFIED (>={SCORE_THRESHOLD}%)")
-            push_to_airtable(job, score, airtable_token)
-            qualified_count += 1
+        if tier1_score < TIER1_THRESHOLD:
+            print(f" ❌ REJECTED (below {TIER1_THRESHOLD}%)")
+            stats["tier1_fail"] += 1
+            continue
         else:
-            print(f" ❌ Below threshold")
-            below_threshold += 1
+            print(f" ✅ PASSED → advancing to Tier 2")
+
+        # ── Tier 2: Gemini AI Deep Scan ──
+        print(f"   🔹 Tier 2 (Gemini AI Deep Scan)...")
+        tier2_score = gemini_deep_scan(job["description"], resume_text, model)
+        print(f"      Tier 2 Score: {tier2_score}%", end="")
+
+        if tier2_score >= TIER2_THRESHOLD:
+            print(f" ✅ QUALIFIED (>={TIER2_THRESHOLD}%)")
+            push_to_airtable(job, tier2_score, airtable_token)
+            stats["pushed"] += 1
+        else:
+            print(f" ❌ REJECTED by AI (below {TIER2_THRESHOLD}%)")
+            stats["tier2_fail"] += 1
 
     # Summary
     print(f"\n{'=' * 60}")
     print(f"📊 PIPELINE SUMMARY")
-    print(f"   Total scraped:      {len(jobs)}")
-    print(f"   Duplicates skipped: {skipped_dupes}")
-    print(f"   Below threshold:    {below_threshold}")
-    print(f"   Pushed to Airtable: {qualified_count}")
+    print(f"   Total scraped:        {stats['total']}")
+    print(f"   Duplicates skipped:   {stats['duplicates']}")
+    print(f"   Tier 1 rejected:      {stats['tier1_fail']}")
+    print(f"   Tier 2 rejected:      {stats['tier2_fail']}")
+    print(f"   Pushed to Airtable:   {stats['pushed']}")
     print(f"{'=' * 60}")
     print("✅ PIPELINE COMPLETE")
 
