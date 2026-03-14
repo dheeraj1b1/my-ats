@@ -26,6 +26,5 @@ jobs:
 
       - name: 🚀 Run Scout Pipeline
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
         run: python scout.py

@@ -1,11 +1,11 @@
 """
-scout.py — Automated LinkedIn Job Scout Pipeline
-=================================================
+scout.py — Automated LinkedIn Job Scout Pipeline (Local ATS Engine)
+====================================================================
 Scrapes LinkedIn public job board for QA/SDET roles,
-scores each JD against resume.txt using Gemini AI,
+scores each JD against resume.txt using a local keyword-based ATS engine,
 and pushes high-scoring matches (>=80%) to Airtable.
 
-Designed to run headlessly via GitHub Actions every 12 hours.
+No external AI APIs required. Runs headlessly via GitHub Actions every 12 hours.
 """
 
 import os
@@ -13,9 +13,9 @@ import re
 import time
 import datetime
 import urllib.parse
+from collections import Counter
 import requests
 from bs4 import BeautifulSoup
-import google.generativeai as genai
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -40,6 +40,86 @@ HEADERS = {
     "Connection": "keep-alive",
     "DNT": "1",
 }
+
+# ─── Stop Words ──────────────────────────────────────────────────────────────
+# Common English words filtered out during keyword extraction
+
+STOP_WORDS = {
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can", "need",
+    "must", "ought", "i", "me", "my", "we", "our", "you", "your", "he",
+    "him", "his", "she", "her", "it", "its", "they", "them", "their",
+    "what", "which", "who", "whom", "this", "that", "these", "those",
+    "am", "if", "then", "else", "when", "where", "why", "how", "all",
+    "each", "every", "both", "few", "more", "most", "other", "some",
+    "such", "no", "nor", "not", "only", "own", "so", "than", "too",
+    "very", "just", "about", "above", "after", "again", "also", "any",
+    "because", "before", "below", "between", "during", "here", "into",
+    "out", "over", "same", "through", "under", "until", "up", "while",
+    "able", "across", "etc", "e", "g", "eg", "ie", "vs", "via",
+    "work", "working", "worked", "experience", "experienced", "using",
+    "used", "use", "including", "include", "includes", "ensure",
+    "strong", "good", "well", "new", "role", "team", "based",
+    "within", "along", "like", "knowledge", "understanding",
+    "years", "year", "required", "preferred", "minimum", "plus",
+    "looking", "join", "opportunity", "responsible", "responsibilities",
+    "candidate", "candidates", "ideal", "key", "skills", "skill",
+    "requirements", "qualification", "qualifications", "description",
+    "job", "position", "apply", "company", "application",
+}
+
+# ─── Technical Terms (Higher Weight) ─────────────────────────────────────────
+# These keywords get 3x weight when matched
+
+TECHNICAL_TERMS = {
+    # Languages & Core
+    "java", "python", "javascript", "typescript", "sql", "core java",
+    # Frameworks & Libraries
+    "selenium", "selenium webdriver", "testng", "junit", "cucumber",
+    "rest assured", "playwright", "cypress", "appium", "karate",
+    "page object model", "pom", "bdd", "tdd",
+    # API & Web Services
+    "api testing", "api", "rest", "restful", "soap", "postman",
+    "swagger", "graphql", "web services", "microservices",
+    # CI/CD & DevOps
+    "jenkins", "github actions", "docker", "kubernetes", "harness",
+    "ci/cd", "cicd", "ci cd", "gradle", "maven", "git",
+    "aws", "ec2", "cloudwatch", "rds", "azure", "gcp",
+    # Testing Types
+    "automation testing", "manual testing", "regression testing",
+    "performance testing", "load testing", "integration testing",
+    "system testing", "functional testing", "smoke testing",
+    "sanity testing", "uat", "e2e", "end to end",
+    # Tools
+    "jmeter", "loadrunner", "splunk", "kafka", "jira", "confluence",
+    "testrail", "bugzilla", "qtest", "artifactory", "dbeaver",
+    "intellij", "vs code", "webdrivermanager", "xpath",
+    # Databases
+    "mysql", "postgresql", "mongodb", "oracle", "sql server",
+    # Methodologies
+    "agile", "scrum", "sdlc", "stlc", "kanban",
+    # Roles
+    "sdet", "qa", "qe", "qa engineer", "qa automation",
+    "automation engineer", "test engineer", "quality engineer",
+    "quality assurance",
+}
+
+# ─── Technical Phrases for Exact Match Bonus ─────────────────────────────────
+# Multi-word phrases that get bonus points when found as exact matches
+
+TECHNICAL_PHRASES = [
+    "selenium webdriver", "rest assured", "page object model",
+    "github actions", "ci/cd", "api testing", "automation testing",
+    "regression testing", "performance testing", "integration testing",
+    "system testing", "manual testing", "load testing",
+    "qa automation", "core java", "web services", "microservices",
+    "end to end", "automation engineer", "qa engineer",
+    "test engineer", "quality assurance", "automation framework",
+    "test framework", "continuous integration", "continuous delivery",
+    "service virtualization", "functional testing",
+]
 
 
 # ─── Step 1: Read Resume ────────────────────────────────────────────────────
@@ -184,38 +264,90 @@ def scrape_linkedin_jobs():
     return all_jobs
 
 
-# ─── Step 3: AI Scoring ─────────────────────────────────────────────────────
+# ─── Step 3: Local ATS Scoring Engine ───────────────────────────────────────
 
-def score_job(job_description, resume_text, model):
+def extract_keywords(text):
     """
-    Send the JD + resume to Gemini and get back an integer score 0-100.
+    Extract meaningful keywords from text.
+    Returns a Counter of lowercase keywords with stop words removed.
     """
-    prompt = f"""You are a strict Applicant Tracking System (ATS).
-Compare the following Job Description against the Resume.
-Evaluate ONLY based on hard skills, tools, technologies, and years of experience.
-DO NOT assume skills. Only count skills explicitly mentioned in the resume.
+    # Normalize text
+    text_lower = text.lower()
+    # Extract words (alphanumeric + some special chars like / for CI/CD)
+    words = re.findall(r"[a-z][a-z0-9/#+.-]*[a-z0-9+#]|[a-z]", text_lower)
+    # Filter out stop words and very short words
+    filtered = [w for w in words if w not in STOP_WORDS and len(w) >= 2]
+    return Counter(filtered)
 
-Return ONLY a single integer from 0 to 100 representing the match percentage.
-Do not return any other text, explanation, or formatting. Just the number.
 
---- JOB DESCRIPTION ---
-{job_description}
+def find_phrase_matches(text, phrases):
+    """
+    Count how many technical phrases are found in the text.
+    Returns (matches_found, total_phrases_checked).
+    """
+    text_lower = text.lower()
+    matches = 0
+    for phrase in phrases:
+        if phrase in text_lower:
+            matches += 1
+    return matches
 
---- RESUME ---
-{resume_text}
-"""
-    try:
-        response = model.generate_content(prompt)
-        score_text = response.text.strip()
-        # Extract just the number
-        match = re.search(r"\d+", score_text)
-        if match:
-            score = int(match.group())
-            return min(score, 100)  # Cap at 100
+
+def calculate_ats_score(resume_text, jd_text):
+    """
+    Calculate an ATS match score (0–100) between resume and job description.
+    
+    Scoring breakdown:
+      - 50% weight: Single keyword overlap (resume keywords found in JD)
+      - 30% weight: Technical term matching (weighted 3x)
+      - 20% weight: Exact phrase matching bonus
+    """
+    # Extract keywords from both texts
+    resume_keywords = extract_keywords(resume_text)
+    jd_keywords = extract_keywords(jd_text)
+
+    if not resume_keywords or not jd_keywords:
         return 0
-    except Exception as e:
-        print(f"      ⚠️ Gemini scoring error: {e}")
-        return 0
+
+    # ── Component 1: General Keyword Overlap (50% weight) ──
+    # What % of the JD's keywords appear in the resume?
+    jd_unique = set(jd_keywords.keys())
+    resume_unique = set(resume_keywords.keys())
+    
+    if jd_unique:
+        keyword_overlap = len(jd_unique & resume_unique) / len(jd_unique)
+    else:
+        keyword_overlap = 0
+
+    # ── Component 2: Technical Term Matching (30% weight, 3x boost) ──
+    # How many technical terms from the JD are in the resume?
+    jd_lower = jd_text.lower()
+    resume_lower = resume_text.lower()
+
+    jd_tech_terms = [t for t in TECHNICAL_TERMS if t in jd_lower]
+    if jd_tech_terms:
+        matched_tech = sum(1 for t in jd_tech_terms if t in resume_lower)
+        tech_score = matched_tech / len(jd_tech_terms)
+    else:
+        tech_score = 0
+
+    # ── Component 3: Exact Phrase Matching (20% weight) ──
+    # How many technical phrases from the JD are in the resume?
+    jd_phrases = [p for p in TECHNICAL_PHRASES if p in jd_lower]
+    if jd_phrases:
+        matched_phrases = sum(1 for p in jd_phrases if p in resume_lower)
+        phrase_score = matched_phrases / len(jd_phrases)
+    else:
+        phrase_score = 0
+
+    # ── Final Weighted Score ──
+    final_score = (
+        (keyword_overlap * 50) +
+        (tech_score * 30) +
+        (phrase_score * 20)
+    )
+
+    return round(min(final_score, 100))
 
 
 # ─── Step 4: Airtable Push ──────────────────────────────────────────────────
@@ -252,16 +384,13 @@ def push_to_airtable(job, score, airtable_token):
 
 def main():
     print("=" * 60)
-    print("🚀 AUTOMATED JOB SCOUT PIPELINE")
+    print("🚀 AUTOMATED JOB SCOUT PIPELINE (Local ATS Engine)")
     print(f"   Time: {datetime.datetime.now().isoformat()}")
+    print(f"   Threshold: {SCORE_THRESHOLD}%")
     print("=" * 60)
 
     # Load environment variables
-    gemini_api_key = os.environ.get("GEMINI_API_KEY")
     airtable_token = os.environ.get("AIRTABLE_TOKEN")
-
-    if not gemini_api_key:
-        raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
     if not airtable_token:
         raise EnvironmentError("AIRTABLE_TOKEN environment variable is not set.")
 
@@ -274,15 +403,14 @@ def main():
         print("\n⚠️ No jobs were scraped. Exiting pipeline.")
         return
 
-    # Step 3: AI Scoring
-    print("\n🤖 Scoring jobs with Gemini AI...")
-    genai.configure(api_key=gemini_api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    # Step 3: Local ATS Scoring
+    print("\n🤖 Scoring jobs with Local ATS Engine...")
+    print(f"   Scoring method: Keyword overlap (50%) + Technical terms (30%) + Phrase match (20%)")
 
     qualified_jobs = []
     for i, job in enumerate(jobs):
         print(f"\n   [{i+1}/{len(jobs)}] Scoring: {job['title']} at {job['company']}...")
-        score = score_job(job["description"], resume_text, model)
+        score = calculate_ats_score(resume_text, job["description"])
         print(f"      Score: {score}%", end="")
 
         if score >= SCORE_THRESHOLD:
@@ -290,8 +418,6 @@ def main():
             qualified_jobs.append((job, score))
         else:
             print(f" ❌ Below threshold")
-
-        time.sleep(1)  # Rate limiting for Gemini API
 
     # Step 4: Push qualified jobs to Airtable
     print(f"\n📊 Results: {len(qualified_jobs)}/{len(jobs)} jobs scored >= {SCORE_THRESHOLD}%")
