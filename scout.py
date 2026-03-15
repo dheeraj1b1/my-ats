@@ -69,6 +69,13 @@ def read_resume(filepath="resume.txt"):
     return text
 
 
+def read_resume_version(filepath="resume.txt"):
+    """Read just the first line of resume.txt as the version identifier."""
+    with open(filepath, "r", encoding="utf-8") as f:
+        first_line = f.readline().strip()
+    return first_line if first_line else "Unknown Version"
+
+
 # ─── Scrape LinkedIn ────────────────────────────────────────────────────────
 
 def build_search_url(keywords, location):
@@ -314,12 +321,19 @@ def get_existing_jobs(airtable_token):
 
 # ─── Airtable: Push ─────────────────────────────────────────────────────────
 
-def push_to_airtable(job, score, airtable_token):
+def push_to_airtable(job, score, airtable_token, resume_version):
+    """POST a qualifying job to Airtable with full payload including JD and resume version."""
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
         "Authorization": f"Bearer {airtable_token}",
         "Content-Type": "application/json",
     }
+
+    # Calculate IST timestamp (UTC+5:30) — GitHub Actions defaults to UTC
+    IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
+    ist_now = datetime.datetime.now(IST)
+    applied_date_ist = ist_now.strftime("%Y-%m-%d %H:%M:%S IST")
+
     data = {
         "fields": {
             "Company": job["company"],
@@ -327,7 +341,9 @@ def push_to_airtable(job, score, airtable_token):
             "Match Score": score,
             "Status": "Not Applied",
             "Apply Link": job["apply_link"],
-            "Applied Date": datetime.datetime.now().strftime("%Y-%m-%d"),
+            "Applied Date": applied_date_ist,
+            "Job Description": job.get("description", ""),
+            "Resume": resume_version,
         }
     }
     try:
@@ -367,6 +383,8 @@ def main():
 
     # Step 1: Read Resume
     resume_text = read_resume("resume.txt")
+    resume_version = read_resume_version("resume.txt")
+    print(f"   Resume version: {resume_version}")
 
     # Step 2: Scrape LinkedIn
     jobs = scrape_linkedin_jobs()
@@ -418,7 +436,7 @@ def main():
 
         if tier2_score >= TIER2_THRESHOLD:
             print(f" ✅ QUALIFIED (>={TIER2_THRESHOLD}%)")
-            push_to_airtable(job, tier2_score, airtable_token)
+            push_to_airtable(job, tier2_score, airtable_token, resume_version)
             stats["pushed"] += 1
         else:
             print(f" ❌ REJECTED by AI (below {TIER2_THRESHOLD}%)")
