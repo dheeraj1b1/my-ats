@@ -13,18 +13,21 @@ import re
 import time
 import datetime
 import urllib.parse
+import json
 import requests
 from bs4 import BeautifulSoup
 from google import genai
+
+from app import MASTER_PROMPT
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 SEARCH_KEYWORDS = "QA Automation OR SDET"
 TARGET_CITIES = ["Bangalore", "Chennai", "Hyderabad"]
 MAX_JOBS = 60
-TIER1_THRESHOLD = 50
+TIER1_THRESHOLD = 30
 TIER2_THRESHOLD = 80
-GEMINI_SLEEP = 120      # Sleep before each Gemini call (5 RPM free tier)
+GEMINI_SLEEP = 225      # Sleep before each Gemini call (3.75 minutes, keeps it well under 5 RPM)
 GEMINI_RETRY_SLEEP = 180  # Sleep on 429 before retry
 
 AIRTABLE_BASE_ID = "appABPMwKgXkr8Rgn"
@@ -217,31 +220,35 @@ def calculate_ats_score(resume_text, jd_text):
 def gemini_deep_scan(jd_text, resume_text, client):
     """
     Sends JD + Resume to gemini-2.5-flash for contextual ATS scoring.
-    Returns an integer score 0-100.
+    Returns a tuple: (score, missing_details)
 
     STRICT TIMERS:
-      - time.sleep(120) before every call (5 RPM free tier)
+      - time.sleep(225) before every call (3.75 minutes)
       - time.sleep(180) + 1 retry on 429 errors
     """
-    prompt = f"""You are a strict Applicant Tracking System (ATS).
-Compare the following Job Description against the Resume.
-Evaluate ONLY based on hard skills, tools, technologies, and years of experience.
-DO NOT assume skills. Only count skills explicitly mentioned in the resume.
+    prompt = f"{MASTER_PROMPT}\n\nResume:\n{resume_text}\n\nJob Description:\n{jd_text}\n\nIMPORTANT: You must respond ONLY with a valid JSON object in this exact format, with no markdown formatting or backticks: {{\"score\": 85, \"missing_details\": \"Brief text about what the candidate lacks for this role.\"}}"
 
-Return ONLY a single integer from 0 to 100 representing the match percentage.
-Do not return any other text, explanation, or formatting. Just the number.
-
---- JOB DESCRIPTION ---
-{jd_text}
-
---- RESUME ---
-{resume_text}
-"""
-
-    # STRICT: 120s sleep before every Gemini call
-    print(f"      ⏳ Rate limit pause ({GEMINI_SLEEP}s)...", end="", flush=True)
+    # STRICT: 225s sleep before every Gemini call
+    print(f"      ⏳ Rate limit pause ({GEMINI_SLEEP}s / 3.75m)...", end="", flush=True)
     time.sleep(GEMINI_SLEEP)
     print(" done")
+
+    def parse_gemini_response(text):
+        try:
+            # Clean up potential markdown formatting
+            text = text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            
+            data = json.loads(text.strip())
+            return min(int(data.get("score", 0)), 100), data.get("missing_details", "")
+        except Exception as e:
+            print(f"      ⚠️ JSON parse error: {e}")
+            return 0, ""
 
     # First attempt
     try:
@@ -249,11 +256,7 @@ Do not return any other text, explanation, or formatting. Just the number.
             model="gemini-2.5-flash",
             contents=prompt,
         )
-        score_text = response.text.strip()
-        match = re.search(r"\d+", score_text)
-        if match:
-            return min(int(match.group()), 100)
-        return 0
+        return parse_gemini_response(response.text)
 
     except Exception as e:
         error_str = str(e)
@@ -267,17 +270,13 @@ Do not return any other text, explanation, or formatting. Just the number.
                     model="gemini-2.5-flash",
                     contents=prompt,
                 )
-                score_text = response.text.strip()
-                match = re.search(r"\d+", score_text)
-                if match:
-                    return min(int(match.group()), 100)
-                return 0
+                return parse_gemini_response(response.text)
             except Exception as retry_err:
                 print(f"      ❌ Retry also failed: {retry_err}")
-                return 0
+                return 0, ""
         else:
             print(f"      ❌ Gemini error: {e}")
-            return 0
+            return 0, ""
 
 
 # ─── Airtable: Duplicate Checker ────────────────────────────────────────────
@@ -321,7 +320,7 @@ def get_existing_jobs(airtable_token):
 
 # ─── Airtable: Push ─────────────────────────────────────────────────────────
 
-def push_to_airtable(job, score, airtable_token, resume_version):
+def push_to_airtable(job, score, missing_details, airtable_token, resume_version):
     """POST a qualifying job to Airtable with full payload including JD and resume version."""
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {
@@ -332,13 +331,14 @@ def push_to_airtable(job, score, airtable_token, resume_version):
     # Calculate IST timestamp (UTC+5:30) — GitHub Actions defaults to UTC
     IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
     ist_now = datetime.datetime.now(IST)
-    applied_date_ist = ist_now.strftime("%Y-%m-%d %H:%M:%S IST")
+    applied_date_ist = ist_now.isoformat()
 
     data = {
         "fields": {
             "Company": job["company"],
             "Role": job["title"],
             "Match Score": score,
+            "Missing Details": missing_details,
             "Status": "Not Applied",
             "Apply Link": job["apply_link"],
             "Applied Date": applied_date_ist,
@@ -431,12 +431,14 @@ def main():
 
         # ── Tier 2: Gemini 2.5 Flash Deep Scan ──
         print(f"   🔹 Tier 2 (Gemini 2.5 Flash Deep Scan)...")
-        tier2_score = gemini_deep_scan(job["description"], resume_text, client)
+        tier2_score, missing_details = gemini_deep_scan(job["description"], resume_text, client)
         print(f"      Tier 2 Score: {tier2_score}%", end="")
 
         if tier2_score >= TIER2_THRESHOLD:
             print(f" ✅ QUALIFIED (>={TIER2_THRESHOLD}%)")
-            push_to_airtable(job, tier2_score, airtable_token, resume_version)
+            if missing_details:
+                print(f"      Missing info: {missing_details}")
+            push_to_airtable(job, tier2_score, missing_details, airtable_token, resume_version)
             stats["pushed"] += 1
         else:
             print(f" ❌ REJECTED by AI (below {TIER2_THRESHOLD}%)")
