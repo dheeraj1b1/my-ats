@@ -10,3 +10,6 @@ __pycache__/
 
 # Streamlit
 .streamlit/
+
+# Test Scripts
+test.py

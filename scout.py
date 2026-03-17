@@ -255,7 +255,7 @@ def gemini_deep_scan(jd_text, resume_text, client):
     # First attempt
     try:
         response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
+            model="gemini-3.1-flash-lite-preview",
             contents=prompt,
         )
         return parse_gemini_response(response.text)
@@ -269,7 +269,7 @@ def gemini_deep_scan(jd_text, resume_text, client):
             time.sleep(GEMINI_RETRY_SLEEP)
             try:
                 response = client.models.generate_content(
-                    model="gemini-3.1-flash-lite",
+                    model="gemini-3.1-flash-lite-preview",
                     contents=prompt,
                 )
                 return parse_gemini_response(response.text)
@@ -406,7 +406,7 @@ def main():
     print(f"   Jobs per city: {JOBS_PER_CITY} × {len(TARGET_CITIES)} cities")
     print(f"   Tier 1 (Local):  >= {TIER1_THRESHOLD}% to advance")
     print(f"   Tier 2 (Gemini): >= {TIER2_THRESHOLD}% to push")
-    print(f"   Model: gemini-3.1-flash-lite")
+    print(f"   Model: gemini-3.1-flash-lite-preview")
     print(f"   Gemini sleep: {GEMINI_SLEEP}s | Retry sleep: {GEMINI_RETRY_SLEEP}s")
     print("=" * 60)
 
