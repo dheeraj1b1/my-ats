@@ -18,7 +18,7 @@ import requests
 from bs4 import BeautifulSoup
 from google import genai
 
-from app import MASTER_PROMPT
+from prompts import MASTER_PROMPT
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -226,7 +226,7 @@ def gemini_deep_scan(jd_text, resume_text, client):
       - time.sleep(225) before every call (3.75 minutes)
       - time.sleep(180) + 1 retry on 429 errors
     """
-    prompt = f"{MASTER_PROMPT}\n\nResume:\n{resume_text}\n\nJob Description:\n{jd_text}\n\nIMPORTANT: You must respond ONLY with a valid JSON object in this exact format, with no markdown formatting or backticks: {{\"score\": 85, \"missing_details\": \"Brief text about what the candidate lacks for this role.\"}}"
+    prompt = MASTER_PROMPT.format(jd_text=jd_text, resume_text=resume_text)
 
     # STRICT: 225s sleep before every Gemini call
     print(f"      ⏳ Rate limit pause ({GEMINI_SLEEP}s / 3.75m)...", end="", flush=True)
@@ -235,19 +235,20 @@ def gemini_deep_scan(jd_text, resume_text, client):
 
     def parse_gemini_response(text):
         try:
-            # Clean up potential markdown formatting
-            text = text.strip()
-            if text.startswith("```json"):
-                text = text[7:]
-            if text.startswith("```"):
-                text = text[3:]
-            if text.endswith("```"):
-                text = text[:-3]
+            score = 0
+            # Extract Score using the same text format from app.py
+            if "MATCH_SCORE:" in text:
+                score_str = text.split("MATCH_SCORE:")[1].split("%")[0].strip()
+                score = int(score_str)
             
-            data = json.loads(text.strip())
-            return min(int(data.get("score", 0)), 100), data.get("missing_details", "")
+            # Extract Missing Details as the rest of the text for Airtable Logging
+            missing_details = text
+            if "### Critical Missing Elements" in text:
+                missing_details = "### Critical Missing Elements" + text.split("### Critical Missing Elements")[1]
+                
+            return min(score, 100), missing_details.strip()
         except Exception as e:
-            print(f"      ⚠️ JSON parse error: {e}")
+            print(f"      ⚠️ Parse error: {e}")
             return 0, ""
 
     # First attempt
