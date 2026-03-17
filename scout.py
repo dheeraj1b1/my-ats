@@ -1,10 +1,11 @@
 """
-scout.py — Two-Tier ATS Job Scout Pipeline
-============================================
-Tier 1: Local Python keyword scoring (>= 50 to advance)
-Tier 2: Gemini 2.5 Flash deep scan  (>= 80 to push)
+scout.py — Two-Tier ATS Job Scout Pipeline (Stateful)
+======================================================
+Tier 1: Local Python keyword scoring (>= 35 to advance)
+Tier 2: Gemini 3.1 Flash Lite deep scan (>= 80 to push)
 
-Scrapes LinkedIn → Dedup via Airtable → Tier 1 → Tier 2 → Push to Airtable.
+Scrapes LinkedIn → Dedup via Airtable + Supabase → Tier 1 → Tier 2 → Push to Airtable.
+Rejected jobs are cached in Supabase for 36 hours to avoid re-evaluation.
 No login required. Runs headlessly via GitHub Actions every 12 hours.
 """
 
@@ -17,6 +18,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from google import genai
+from supabase import create_client
 
 from prompts import MASTER_PROMPT
 
@@ -24,10 +26,10 @@ from prompts import MASTER_PROMPT
 
 SEARCH_KEYWORDS = "QA Automation OR SDET"
 TARGET_CITIES = ["Bangalore", "Chennai", "Hyderabad"]
-MAX_JOBS = 60
-TIER1_THRESHOLD = 30
+JOBS_PER_CITY = 33
+TIER1_THRESHOLD = 35
 TIER2_THRESHOLD = 80
-GEMINI_SLEEP = 225      # Sleep before each Gemini call (3.75 minutes, keeps it well under 5 RPM)
+GEMINI_SLEEP = 60         # Sleep before each Gemini call (1 minute)
 GEMINI_RETRY_SLEEP = 180  # Sleep on 429 before retry
 
 AIRTABLE_BASE_ID = "appABPMwKgXkr8Rgn"
@@ -95,11 +97,9 @@ def scrape_linkedin_jobs():
     all_jobs = []
 
     for city in TARGET_CITIES:
-        if len(all_jobs) >= MAX_JOBS:
-            break
-
+        city_count = 0
         url = build_search_url(SEARCH_KEYWORDS, city)
-        print(f"\n🔎 Scraping jobs in {city}...")
+        print(f"\n🔎 Scraping jobs in {city} (max {JOBS_PER_CITY})...")
         print(f"   URL: {url}")
 
         try:
@@ -118,7 +118,7 @@ def scrape_linkedin_jobs():
         print(f"   Found {len(job_cards)} job cards")
 
         for card in job_cards:
-            if len(all_jobs) >= MAX_JOBS:
+            if city_count >= JOBS_PER_CITY:
                 break
             try:
                 title_tag = (
@@ -145,6 +145,7 @@ def scrape_linkedin_jobs():
                     "city": city,
                     "description": "",
                 })
+                city_count += 1
             except Exception as e:
                 print(f"   ⚠️ Error parsing a job card: {e}")
                 continue
@@ -215,21 +216,21 @@ def calculate_ats_score(resume_text, jd_text):
     return final_score
 
 
-# ─── Tier 2: Gemini 2.5 Flash Deep Scan ─────────────────────────────────────
+# ─── Tier 2: Gemini 3.1 Flash Lite Deep Scan ────────────────────────────────
 
 def gemini_deep_scan(jd_text, resume_text, client):
     """
-    Sends JD + Resume to gemini-2.5-flash for contextual ATS scoring.
+    Sends JD + Resume to gemini-3.1-flash-lite for contextual ATS scoring.
     Returns a tuple: (score, missing_details)
 
     STRICT TIMERS:
-      - time.sleep(225) before every call (3.75 minutes)
+      - time.sleep(60) before every call (1 minute)
       - time.sleep(180) + 1 retry on 429 errors
     """
     prompt = MASTER_PROMPT.format(jd_text=jd_text, resume_text=resume_text)
 
-    # STRICT: 225s sleep before every Gemini call
-    print(f"      ⏳ Rate limit pause ({GEMINI_SLEEP}s / 3.75m)...", end="", flush=True)
+    # STRICT: 60s sleep before every Gemini call
+    print(f"      ⏳ Rate limit pause ({GEMINI_SLEEP}s / 1m)...", end="", flush=True)
     time.sleep(GEMINI_SLEEP)
     print(" done")
 
@@ -240,12 +241,12 @@ def gemini_deep_scan(jd_text, resume_text, client):
             if "MATCH_SCORE:" in text:
                 score_str = text.split("MATCH_SCORE:")[1].split("%")[0].strip()
                 score = int(score_str)
-            
+
             # Extract Missing Details as the rest of the text for Airtable Logging
             missing_details = text
             if "### Critical Missing Elements" in text:
                 missing_details = "### Critical Missing Elements" + text.split("### Critical Missing Elements")[1]
-                
+
             return min(score, 100), missing_details.strip()
         except Exception as e:
             print(f"      ⚠️ Parse error: {e}")
@@ -254,7 +255,7 @@ def gemini_deep_scan(jd_text, resume_text, client):
     # First attempt
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=prompt,
         )
         return parse_gemini_response(response.text)
@@ -268,7 +269,7 @@ def gemini_deep_scan(jd_text, resume_text, client):
             time.sleep(GEMINI_RETRY_SLEEP)
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.1-flash-lite",
                     contents=prompt,
                 )
                 return parse_gemini_response(response.text)
@@ -278,6 +279,45 @@ def gemini_deep_scan(jd_text, resume_text, client):
         else:
             print(f"      ❌ Gemini error: {e}")
             return 0, ""
+
+
+# ─── Supabase: Rejection Cache ──────────────────────────────────────────────
+
+def purge_old_rejections(supabase_client):
+    """Delete rejection records older than 36 hours."""
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=36)
+    cutoff_iso = cutoff.isoformat()
+    try:
+        result = supabase_client.table("tier1_rejections").delete().lt("rejected_at", cutoff_iso).execute()
+        deleted = len(result.data) if result.data else 0
+        print(f"   🗑️ Purged {deleted} stale rejections (older than 36h)")
+    except Exception as e:
+        print(f"   ⚠️ Failed to purge old rejections: {e}")
+
+
+def get_rejected_urls(supabase_client):
+    """Fetch all rejected job URLs from Supabase into a set."""
+    rejected = set()
+    try:
+        result = supabase_client.table("tier1_rejections").select("job_url").execute()
+        for row in result.data or []:
+            rejected.add(row["job_url"])
+        print(f"   ✅ Found {len(rejected)} previously rejected jobs in Supabase")
+    except Exception as e:
+        print(f"   ⚠️ Failed to fetch rejected URLs: {e}")
+    return rejected
+
+
+def insert_rejection(supabase_client, job):
+    """Insert a rejected job into the Supabase cache."""
+    try:
+        supabase_client.table("tier1_rejections").insert({
+            "job_url": job["apply_link"],
+            "company": job["company"],
+            "title": job["title"],
+        }).execute()
+    except Exception as e:
+        print(f"      ⚠️ Failed to cache rejection: {e}")
 
 
 # ─── Airtable: Duplicate Checker ────────────────────────────────────────────
@@ -343,8 +383,8 @@ def push_to_airtable(job, score, missing_details, airtable_token, resume_version
             "Status": "Not Applied",
             "Apply Link": job["apply_link"],
             "Applied Date": applied_date_ist,
-            "Job Description": job.get("description", ""),
-            "Resume": resume_version,
+            "JD Description": job.get("description", ""),
+            "Resume Name": resume_version,
         }
     }
     try:
@@ -361,26 +401,35 @@ def push_to_airtable(job, score, missing_details, airtable_token, resume_version
 
 def main():
     print("=" * 60)
-    print("🚀 TWO-TIER ATS JOB SCOUT PIPELINE")
+    print("🚀 TWO-TIER ATS JOB SCOUT PIPELINE (Stateful)")
     print(f"   Time: {datetime.datetime.now().isoformat()}")
-    print(f"   Max Jobs: {MAX_JOBS}")
+    print(f"   Jobs per city: {JOBS_PER_CITY} × {len(TARGET_CITIES)} cities")
     print(f"   Tier 1 (Local):  >= {TIER1_THRESHOLD}% to advance")
     print(f"   Tier 2 (Gemini): >= {TIER2_THRESHOLD}% to push")
-    print(f"   Model: gemini-2.5-flash")
+    print(f"   Model: gemini-3.1-flash-lite")
     print(f"   Gemini sleep: {GEMINI_SLEEP}s | Retry sleep: {GEMINI_RETRY_SLEEP}s")
     print("=" * 60)
 
     # Load environment variables
     gemini_api_key = os.environ.get("GEMINI_API_KEY")
     airtable_token = os.environ.get("AIRTABLE_TOKEN")
+    supabase_url = os.environ.get("SUPABASE_URL")
+    supabase_key = os.environ.get("SUPABASE_KEY")
 
     if not gemini_api_key:
         raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
     if not airtable_token:
         raise EnvironmentError("AIRTABLE_TOKEN environment variable is not set.")
+    if not supabase_url or not supabase_key:
+        raise EnvironmentError("SUPABASE_URL and SUPABASE_KEY environment variables must be set.")
 
-    # Set up Gemini client (google-genai SDK)
+    # Set up clients
     client = genai.Client(api_key=gemini_api_key)
+    supabase = create_client(supabase_url, supabase_key)
+
+    # Step 0: Purge stale rejections (older than 36 hours)
+    print("\n🧹 Purging stale Supabase rejections...")
+    purge_old_rejections(supabase)
 
     # Step 1: Read Resume
     resume_text = read_resume("resume.txt")
@@ -395,6 +444,10 @@ def main():
 
     # Step 3: Fetch existing Airtable records for deduplication
     existing_urls = get_existing_jobs(airtable_token)
+
+    # Step 3b: Fetch Supabase rejection cache
+    print("\n🔍 Checking Supabase rejection cache...")
+    rejected_urls = get_rejected_urls(supabase)
 
     # Step 4: Two-Tier Scoring
     print("\n" + "=" * 60)
@@ -412,9 +465,9 @@ def main():
     for i, job in enumerate(jobs):
         print(f"\n── [{i+1}/{len(jobs)}] {job['title']} at {job['company']} ({job['city']})")
 
-        # ── Dedup Check ──
-        if job["apply_link"] in existing_urls:
-            print(f"   ⏭️ Skipping {job['company']} - Already logged")
+        # ── Dedup Check (Airtable + Supabase) ──
+        if job["apply_link"] in existing_urls or job["apply_link"] in rejected_urls:
+            print(f"   ⏭️ Skipping {job['company']} - Already logged/rejected")
             stats["duplicates"] += 1
             continue
 
@@ -425,24 +478,24 @@ def main():
 
         if tier1_score < TIER1_THRESHOLD:
             print(f" ❌ REJECTED (below {TIER1_THRESHOLD}%)")
+            insert_rejection(supabase, job)
             stats["tier1_fail"] += 1
             continue
         else:
             print(f" ✅ PASSED → advancing to Tier 2")
 
-        # ── Tier 2: Gemini 2.5 Flash Deep Scan ──
-        print(f"   🔹 Tier 2 (Gemini 2.5 Flash Deep Scan)...")
+        # ── Tier 2: Gemini 3.1 Flash Lite Deep Scan ──
+        print(f"   🔹 Tier 2 (Gemini 3.1 Flash Lite Deep Scan)...")
         tier2_score, missing_details = gemini_deep_scan(job["description"], resume_text, client)
         print(f"      Tier 2 Score: {tier2_score}%", end="")
 
         if tier2_score >= TIER2_THRESHOLD:
             print(f" ✅ QUALIFIED (>={TIER2_THRESHOLD}%)")
-            if missing_details:
-                print(f"      Missing info: {missing_details}")
             push_to_airtable(job, tier2_score, missing_details, airtable_token, resume_version)
             stats["pushed"] += 1
         else:
             print(f" ❌ REJECTED by AI (below {TIER2_THRESHOLD}%)")
+            insert_rejection(supabase, job)
             stats["tier2_fail"] += 1
 
     # Summary
