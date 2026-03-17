@@ -24,12 +24,12 @@ from prompts import MASTER_PROMPT
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-SEARCH_KEYWORDS = "QA Automation OR SDET"
+SEARCH_KEYWORDS = "SDET OR Automation Engineer OR Quality Assurance Engineer OR Software Engineer in Test OR Test Automation Engineer OR QA Automation Engineer OR QA Engineer OR Test Engineer OR QA Engineer OR Test Engineer"
 TARGET_CITIES = ["Bangalore", "Chennai", "Hyderabad"]
-JOBS_PER_CITY = 33
+JOBS_PER_CITY = 60
 TIER1_THRESHOLD = 35
 TIER2_THRESHOLD = 80
-GEMINI_SLEEP = 60         # Sleep before each Gemini call (1 minute)
+GEMINI_SLEEP = 90         # Sleep before each Gemini call (1 minute)
 GEMINI_RETRY_SLEEP = 180  # Sleep on 429 before retry
 
 AIRTABLE_BASE_ID = "appABPMwKgXkr8Rgn"
@@ -313,8 +313,8 @@ def insert_rejection(supabase_client, job):
     try:
         supabase_client.table("tier1_rejections").insert({
             "job_url": job["apply_link"],
-            "company": job["company"],
-            "title": job["title"],
+            "company_name": job["company"],
+            "job_title": job["title"],
         }).execute()
     except Exception as e:
         print(f"      ⚠️ Failed to cache rejection: {e}")
