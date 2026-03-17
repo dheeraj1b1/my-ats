@@ -13,6 +13,7 @@ import os
 import re
 import time
 import datetime
+import random
 import urllib.parse
 import json
 import requests
@@ -75,10 +76,18 @@ def read_resume(filepath="resume.txt"):
 
 
 def read_resume_version(filepath="resume.txt"):
-    """Read just the first line of resume.txt as the version identifier."""
+    """Read the first 5 lines of resume.txt to find the version identifier."""
+    if not os.path.exists(filepath):
+        return "Unknown Version"
     with open(filepath, "r", encoding="utf-8") as f:
-        first_line = f.readline().strip()
-    return first_line if first_line else "Unknown Version"
+        for _ in range(5):
+            line = f.readline()
+            if not line:
+                break
+            line = line.strip()
+            if line.lower().startswith("version:"):
+                return line
+    return "Unknown Version"
 
 
 # ─── Scrape LinkedIn ────────────────────────────────────────────────────────
@@ -173,10 +182,20 @@ def scrape_linkedin_jobs():
             else:
                 job["description"] = f"Role: {job['title']} at {job['company']}"
                 print(f"   [{i+1}/{len(all_jobs)}] ⚠️ No description found for {job['title']}")
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 429:
+                print(f"   [{i+1}/{len(all_jobs)}] ⚠️ Hit LinkedIn 429 Rate Limit. Sleeping 30s...")
+                time.sleep(30)
+                job["description"] = f"Role: {job['title']} at {job['company']}"
+                continue
+            else:
+                print(f"   [{i+1}/{len(all_jobs)}] ⚠️ Failed to get description: {e}")
+                job["description"] = f"Role: {job['title']} at {job['company']}"
         except Exception as e:
             print(f"   [{i+1}/{len(all_jobs)}] ⚠️ Failed to get description: {e}")
             job["description"] = f"Role: {job['title']} at {job['company']}"
-        time.sleep(1)
+            
+        time.sleep(random.uniform(3.5, 5.5))
 
     print(f"\n✅ Total jobs scraped: {len(all_jobs)}")
     return all_jobs
@@ -295,17 +314,26 @@ def purge_old_rejections(supabase_client):
         print(f"   ⚠️ Failed to purge old rejections: {e}")
 
 
-def get_rejected_urls(supabase_client):
-    """Fetch all rejected job URLs from Supabase into a set."""
-    rejected = set()
+def get_rejected_jobs(supabase_client):
+    """Fetch all rejected jobs from Supabase into a set of URLs and a set of (company, title) tuples."""
+    rejected_urls = set()
+    rejected_roles = set()
     try:
-        result = supabase_client.table("tier1_rejections").select("job_url").execute()
+        result = supabase_client.table("tier1_rejections").select("job_url, company_name, job_title").execute()
         for row in result.data or []:
-            rejected.add(row["job_url"])
-        print(f"   ✅ Found {len(rejected)} previously rejected jobs in Supabase")
+            url = row.get("job_url", "")
+            if url:
+                rejected_urls.add(url.split('?')[0])
+                
+            comp = row.get("company_name", "")
+            title = row.get("job_title", "")
+            if comp and title:
+                rejected_roles.add((comp.lower(), title.lower()))
+                
+        print(f"   ✅ Found {len(result.data or [])} previously rejected jobs in Supabase")
     except Exception as e:
-        print(f"   ⚠️ Failed to fetch rejected URLs: {e}")
-    return rejected
+        print(f"   ⚠️ Failed to fetch rejected jobs: {e}")
+    return rejected_urls, rejected_roles
 
 
 def insert_rejection(supabase_client, job):
@@ -322,12 +350,13 @@ def insert_rejection(supabase_client, job):
 
 # ─── Airtable: Duplicate Checker ────────────────────────────────────────────
 
-def get_existing_jobs(airtable_token):
-    """Fetch existing Apply Link URLs from Airtable (Not Applied + Applied)."""
+def get_airtable_jobs(airtable_token):
+    """Fetch existing Apply Link URLs and Roles from Airtable (Not Applied + Applied)."""
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {"Authorization": f"Bearer {airtable_token}"}
 
     existing_urls = set()
+    existing_roles = set()
     offset = None
 
     print("\n🔍 Checking Airtable for existing jobs...")
@@ -348,15 +377,21 @@ def get_existing_jobs(airtable_token):
             fields = record.get("fields", {})
             apply_link = fields.get("Apply Link", "")
             status = fields.get("Status", "")
-            if apply_link and status in ("Not Applied", "Applied"):
-                existing_urls.add(apply_link)
+            company = fields.get("Company", "")
+            role = fields.get("Role", "")
+            
+            if apply_link and status in ("Not Applied", "Applied", "Rejected"):
+                existing_urls.add(apply_link.split('?')[0])
+            if company and role and status in ("Not Applied", "Applied", "Rejected"):
+                existing_roles.add((company.lower(), role.lower()))
 
         offset = data.get("offset")
         if not offset:
             break
 
-    print(f"   ✅ Found {len(existing_urls)} existing jobs in Airtable")
-    return existing_urls
+    total_found = len(existing_urls) + len(existing_roles)
+    print(f"   ✅ Found {total_found} existing tracking points in Airtable")
+    return existing_urls, existing_roles
 
 
 # ─── Airtable: Push ─────────────────────────────────────────────────────────
@@ -443,11 +478,11 @@ def main():
         return
 
     # Step 3: Fetch existing Airtable records for deduplication
-    existing_urls = get_existing_jobs(airtable_token)
+    existing_urls, existing_roles = get_airtable_jobs(airtable_token)
 
     # Step 3b: Fetch Supabase rejection cache
     print("\n🔍 Checking Supabase rejection cache...")
-    rejected_urls = get_rejected_urls(supabase)
+    rejected_urls, rejected_roles = get_rejected_jobs(supabase)
 
     # Step 4: Two-Tier Scoring
     print("\n" + "=" * 60)
@@ -466,8 +501,15 @@ def main():
         print(f"\n── [{i+1}/{len(jobs)}] {job['title']} at {job['company']} ({job['city']})")
 
         # ── Dedup Check (Airtable + Supabase) ──
-        if job["apply_link"] in existing_urls or job["apply_link"] in rejected_urls:
-            print(f"   ⏭️ Skipping {job['company']} - Already logged/rejected")
+        clean_url = job["apply_link"].split('?')[0] if job["apply_link"] else ""
+        role_tuple = (job["company"].lower(), job["title"].lower())
+        
+        is_dup_url = clean_url and (clean_url in existing_urls or clean_url in rejected_urls)
+        is_dup_role = role_tuple[0] != "unknown" and role_tuple[1] != "unknown" and (role_tuple in existing_roles or role_tuple in rejected_roles)
+
+        if is_dup_url or is_dup_role:
+            reason = "URL matched" if is_dup_url else "Company & Role matched"
+            print(f"   ⏭️ Skipping {job['company']} - Already logged/rejected ({reason})")
             stats["duplicates"] += 1
             continue
 
