@@ -6,6 +6,18 @@ import datetime
 import pytz
 import requests
 
+from tailor import (
+    fetch_not_applied_jobs,
+    parse_docx_sections,
+    get_texts,
+    build_tailor_prompt,
+    generate_with_fallback,
+    apply_tailored_sections,
+    save_doc_to_bytes,
+    is_rate_limited,
+    DAILY_LIMIT,
+)
+
 # --- Helper Function ---
 
 def extract_text_from_file(file):
@@ -218,3 +230,126 @@ if 'last_scan' in st.session_state:
                     st.balloons()
                 else:
                     st.error(f"Failed to log: {resp.text}")
+
+# =====================================================================
+# 4. RESUME TAILOR — Truthful JD-Matched Resume Optimization
+# =====================================================================
+
+st.divider()
+st.header("4. ✂️ Resume Tailor")
+st.caption(
+    "Rephrase your Experience & Projects bullets to mirror a target JD's vocabulary. "
+    "No skills are fabricated — only existing content is reworded and reordered."
+)
+
+# ── 4a. Fetch Not Applied jobs from Airtable ──
+if airtable_base_id and airtable_token:
+    with st.spinner("Fetching 'Not Applied' jobs from Airtable..."):
+        tailor_jobs = fetch_not_applied_jobs(airtable_base_id, airtable_token)
+
+    if tailor_jobs:
+        job_labels = [
+            f"{j['company']} — {j['role']}" for j in tailor_jobs
+        ]
+        selected_index = st.selectbox(
+            "Select a job to tailor your resume for:",
+            range(len(job_labels)),
+            format_func=lambda i: job_labels[i],
+            key="tailor_job_select",
+        )
+
+        selected_job = tailor_jobs[selected_index]
+
+        # Show JD preview
+        with st.expander("📋 View Job Description", expanded=False):
+            if selected_job["jd_description"]:
+                st.text(selected_job["jd_description"])
+            else:
+                st.warning("No JD Description stored for this job.")
+
+        # ── 4b. Upload .docx resume ──
+        st.subheader("Upload your .docx Resume")
+        tailor_file = st.file_uploader(
+            "Upload the DOCX resume to tailor",
+            type=["docx"],
+            key="tailor_docx_upload",
+        )
+
+        if tailor_file and selected_job["jd_description"]:
+            # Parse the DOCX
+            doc, summary_paras, exp_paras, proj_paras, skills_paras = parse_docx_sections(tailor_file)
+            summary_texts = get_texts(summary_paras)
+            exp_texts = get_texts(exp_paras)
+            proj_texts = get_texts(proj_paras)
+            skills_texts = get_texts(skills_paras)
+
+            with st.expander("🔍 Extracted Sections Preview", expanded=False):
+                st.markdown(f"**Summary lines:** {len(summary_texts)}")
+                st.markdown(f"**Experience bullets:** {len(exp_texts)}")
+                st.markdown(f"**Projects bullets:** {len(proj_texts)}")
+                st.markdown(f"**Skills lines:** {len(skills_texts)}")
+
+            if not exp_texts and not proj_texts:
+                st.warning(
+                    "⚠️ No Experience or Projects bullets detected. "
+                    "Make sure your DOCX has 'EXPERIENCE' and 'PROJECTS' section headers."
+                )
+            else:
+                # ── 4c. Rate-limit guard ──
+                if is_rate_limited():
+                    st.warning(
+                        f"⚠️ Daily API Limit Reached ({DAILY_LIMIT} requests). "
+                        "Try again tomorrow."
+                    )
+                else:
+                    remaining = DAILY_LIMIT - st.session_state.get("tailor_api_calls", 0)
+                    st.info(f"📊 API calls today: {st.session_state.get('tailor_api_calls', 0)} / {DAILY_LIMIT} ({remaining} remaining)")
+
+                    # ── 4d. Tailor button ──
+                    if st.button("✂️ Tailor Resume", key="tailor_btn"):
+                        if not api_key:
+                            st.warning("Please enter your Gemini API Key above.")
+                        else:
+                            with st.spinner("🤖 Tailoring your resume with AI..."):
+                                prompt = build_tailor_prompt(
+                                    selected_job["jd_description"],
+                                    summary_texts,
+                                    exp_texts,
+                                    proj_texts,
+                                    skills_texts,
+                                )
+                                ai_result = generate_with_fallback(prompt, api_key)
+
+                            if ai_result:
+                                # Show AI output for transparency
+                                with st.expander("🧠 AI Response (raw)", expanded=False):
+                                    st.text(ai_result)
+
+                                # Apply changes in-place on the DOCX paragraphs
+                                total_replaced = apply_tailored_sections(
+                                    summary_paras, exp_paras, proj_paras, skills_paras, ai_result
+                                )
+                                st.success(
+                                    f"✅ Replaced {total_replaced} total elements across all 4 sections."
+                                )
+
+                                # Save modified DOCX and offer download
+                                doc_bytes = save_doc_to_bytes(doc)
+                                company_slug = selected_job["company"].replace(" ", "_")[:20]
+                                filename = f"Tailored_Resume_{company_slug}.docx"
+
+                                st.download_button(
+                                    label="⬇️ Download Tailored Resume (.docx)",
+                                    data=doc_bytes,
+                                    file_name=filename,
+                                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    key="tailor_download",
+                                )
+                            else:
+                                st.error("Tailoring failed. See error messages above.")
+        elif tailor_file and not selected_job["jd_description"]:
+            st.warning("⚠️ The selected job has no JD Description. Cannot tailor without a JD.")
+    else:
+        st.info("No 'Not Applied' jobs found in Airtable. Run the Scout pipeline first.")
+else:
+    st.warning("⚠️ Airtable credentials are required for the Resume Tailor.")
