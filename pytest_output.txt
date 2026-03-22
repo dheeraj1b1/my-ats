@@ -1,0 +1,28 @@
+============================= test session starts =============================
+collecting ... collected 23 items
+
+test_scout_refactor.py::TestNormalizeCompany::test_basic_lowercase_and_strip PASSED [  4%]
+test_scout_refactor.py::TestNormalizeCompany::test_trailing_punctuation PASSED [  8%]
+test_scout_refactor.py::TestNormalizeCompany::test_single_suffix PASSED  [ 13%]
+test_scout_refactor.py::TestNormalizeCompany::test_multiple_suffixes PASSED [ 17%]
+test_scout_refactor.py::TestNormalizeCompany::test_private_limited PASSED [ 21%]
+test_scout_refactor.py::TestNormalizeCompany::test_combo_suffixes_with_punctuation PASSED [ 26%]
+test_scout_refactor.py::TestNormalizeCompany::test_idempotent_clean_name PASSED [ 30%]
+test_scout_refactor.py::TestNormalizeCompany::test_empty_string PASSED   [ 34%]
+test_scout_refactor.py::TestNormalizeCompany::test_only_suffix PASSED    [ 39%]
+test_scout_refactor.py::TestRecruiterBlacklist::test_vidpro_with_suffixes PASSED [ 43%]
+test_scout_refactor.py::TestRecruiterBlacklist::test_clean_blacklisted PASSED [ 47%]
+test_scout_refactor.py::TestRecruiterBlacklist::test_legitimate_company_not_blocked PASSED [ 52%]
+test_scout_refactor.py::TestSeniorityFilter::test_reject_junior PASSED   [ 56%]
+test_scout_refactor.py::TestSeniorityFilter::test_reject_associate_engineer PASSED [ 60%]
+test_scout_refactor.py::TestSeniorityFilter::test_reject_intern PASSED   [ 65%]
+test_scout_refactor.py::TestSeniorityFilter::test_safe_associate_vp PASSED [ 69%]
+test_scout_refactor.py::TestSeniorityFilter::test_safe_senior_sdet PASSED [ 73%]
+test_scout_refactor.py::TestSeniorityFilter::test_safe_associate_director PASSED [ 78%]
+test_scout_refactor.py::TestDomainReject::test_gaming_flagged PASSED     [ 82%]
+test_scout_refactor.py::TestDomainReject::test_real_estate_flagged PASSED [ 86%]
+test_scout_refactor.py::TestDomainReject::test_defence_flagged PASSED    [ 91%]
+test_scout_refactor.py::TestDomainReject::test_cloud_saas_safe PASSED    [ 95%]
+test_scout_refactor.py::TestDomainReject::test_fintech_safe PASSED       [100%]
+
+============================= 23 passed in 0.03s ==============================

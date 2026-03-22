@@ -39,4 +39,13 @@ MATCH_SCORE: [Percentage]%
 * **Skills/Core Competencies:** [Keywords to add explicitly]
 * **Experience/Projects:** [Where to add explicit years/context]
 * **Education/Certifications:** [Missing certs or degrees]
+
+## SCORING STRICTNESS
+- If the JD lists a skill as REQUIRED or MUST HAVE and it is completely absent
+  from the resume, apply a 30% penalty to MATCH_SCORE.
+- If the JD lists a skill as PREFERRED or NICE TO HAVE and it is absent,
+  apply a 10% penalty only.
+- Do not stack penalties beyond 40% total — a strong match on all other skills
+  should still score 55%+ even with one hard gap.
+- Never score above 85% if a PRIMARY required skill is missing entirely.
 """

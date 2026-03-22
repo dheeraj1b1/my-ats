@@ -25,7 +25,7 @@ from prompts import MASTER_PROMPT
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-SEARCH_KEYWORDS = "SDET OR Automation Engineer OR Quality Assurance Engineer OR Software Engineer in Test OR Test Automation Engineer OR QA Automation Engineer OR QA Engineer OR Test Engineer OR QA Engineer OR Test Engineer"
+SEARCH_KEYWORDS = "SDET OR Automation Engineer OR Quality Assurance Engineer OR Software Engineer in Test OR Test Automation Engineer OR QA Automation Engineer OR QA Engineer OR Test Engineer OR QA Engineer OR Test Engineer NOT Junior NOT Fresher NOT Intern NOT Trainee"
 TARGET_CITIES = ["Bangalore", "Chennai", "Hyderabad"]
 JOBS_PER_CITY = 60
 TIER1_THRESHOLD = 30
@@ -48,6 +48,48 @@ HEADERS = {
     "Connection": "keep-alive",
     "DNT": "1",
 }
+
+# ─── Company Normalization ──────────────────────────────────────────────────
+
+COMPANY_STRIP_SUFFIXES = [
+    "private limited", "pvt ltd", "ltd", "inc", "llc",
+    "solutions", "technologies", "tech", "services", "india", "group",
+]
+
+
+def normalize_company(name: str) -> str:
+    """Lowercase, strip trailing punctuation, and remove common corporate suffixes."""
+    name = name.lower().strip().rstrip(".,;:")
+    changed = True
+    while changed:
+        changed = False
+        for suffix in COMPANY_STRIP_SUFFIXES:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)].strip().rstrip(".,;:")
+                changed = True
+    return name
+
+
+RECRUITER_BLACKLIST = [
+    "viraaj hr", "grid career", "vidpro hr",
+    "sourcingxpress", "peopleprime", "people prime",
+    "qualitest", "talent hub", "workforce",
+]
+
+SENIORITY_REJECT = [
+    "junior", "jr.", "entry level", "fresher",
+    "trainee", "intern", "graduate trainee",
+    "associate engineer", "associate developer",
+    "associate qa", "associate test",
+]
+
+DOMAIN_REJECT_KEYWORDS = [
+    "gaming", "casino", "gambling", "game studio",
+    "travel", "hospitality", "hotel",
+    "real estate", "property",
+    "industrial automation", "embedded systems",
+    "oil", "mining", "defence", "defense",
+]
 
 # ─── Skill Definitions ──────────────────────────────────────────────────────
 
@@ -328,7 +370,7 @@ def get_rejected_jobs(supabase_client):
             comp = row.get("company_name", "")
             title = row.get("job_title", "")
             if comp and title:
-                rejected_roles.add((comp.lower(), title.lower()))
+                rejected_roles.add((normalize_company(comp), title.lower()))
                 
         print(f"   ✅ Found {len(result.data or [])} previously rejected jobs in Supabase")
     except Exception as e:
@@ -383,7 +425,7 @@ def get_airtable_jobs(airtable_token):
             if apply_link and status in ("Not Applied", "Applied", "Rejected"):
                 existing_urls.add(apply_link.split('?')[0])
             if company and role and status in ("Not Applied", "Applied", "Rejected"):
-                existing_roles.add((company.lower(), role.lower()))
+                existing_roles.add((normalize_company(company), role.lower()))
 
         offset = data.get("offset")
         if not offset:
@@ -502,7 +544,7 @@ def main():
 
         # ── Dedup Check (Airtable + Supabase) ──
         clean_url = job["apply_link"].split('?')[0] if job["apply_link"] else ""
-        role_tuple = (job["company"].lower(), job["title"].lower())
+        role_tuple = (normalize_company(job["company"]), job["title"].lower())
         
         is_dup_url = clean_url and (clean_url in existing_urls or clean_url in rejected_urls)
         is_dup_role = role_tuple[0] != "unknown" and role_tuple[1] != "unknown" and (role_tuple in existing_roles or role_tuple in rejected_roles)
@@ -511,6 +553,28 @@ def main():
             reason = "URL matched" if is_dup_url else "Company & Role matched"
             print(f"   ⏭️ Skipping {job['company']} - Already logged/rejected ({reason})")
             stats["duplicates"] += 1
+            continue
+
+        # ── Recruiter / Agency Blacklist ──
+        if normalize_company(job["company"]) in RECRUITER_BLACKLIST:
+            print(f"   ⏭️ Skipping {job['company']} — recruiter/agency")
+            stats["duplicates"] += 1
+            continue
+
+        # ── Seniority Filter ──
+        title_lower = job["title"].lower()
+        if any(kw in title_lower for kw in SENIORITY_REJECT):
+            print(f"   ⏭️ Skipping {job['title']} — below seniority level")
+            insert_rejection(supabase, job)
+            stats["tier1_fail"] += 1
+            continue
+
+        # ── Domain Mismatch Filter ──
+        jd_text_lower = job.get("description", "").lower()
+        if any(kw in jd_text_lower for kw in DOMAIN_REJECT_KEYWORDS):
+            print(f"   ⏭️ Skipping {job['title']} — domain mismatch")
+            insert_rejection(supabase, job)
+            stats["tier1_fail"] += 1
             continue
 
         # ── Tier 1: Local Keyword Bouncer ──
