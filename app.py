@@ -872,12 +872,35 @@ elif page == "☁️ Document Vault":
             
             vault_df = pd.DataFrame(file_data)
             
+            st.caption("Select rows to delete and click **💾 Delete Selected Files** to free up storage.")
+            
             # Show interactive dataframe where Link is clickable
-            st.dataframe(
+            edited_vault = st.data_editor(
                 vault_df,
                 column_config={
                     "Link": st.column_config.LinkColumn("Public URL")
                 },
                 width="stretch",
-                hide_index=True
+                hide_index=True,
+                num_rows="dynamic",
+                key="vault_editor"
             )
+
+            if st.button("💾 Delete Selected Files", key="vault_del_btn"):
+                state = st.session_state.get("vault_editor", {})
+                deleted = state.get("deleted_rows", [])
+                
+                if deleted:
+                    files_to_delete = []
+                    for idx in deleted:
+                        files_to_delete.append(vault_df.iloc[idx]["Filename"])
+                    
+                    try:
+                        res = supabase_client.storage.from_("tailored_resumes").remove(files_to_delete)
+                        st.success(f"✅ Deleted {len(res)} file(s) from Supabase!")
+                        fetch_vault_files.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Failed to delete files: {e}")
+                else:
+                    st.info("No files selected for deletion.")
