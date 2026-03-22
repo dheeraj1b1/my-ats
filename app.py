@@ -402,6 +402,7 @@ elif page == "📊 Airtable Tracker":
             if status_filter:
                 df = df[df["Status"].isin(status_filter)]
 
+            df = df.reset_index(drop=True)
             st.metric("Showing Applications", len(df))
 
 
@@ -604,6 +605,7 @@ elif page == "🗄️ Supabase Viewer":
                             mask = mask | df[col].str.contains(search_query, case=False, na=False)
                     df = df[mask]
 
+                df = df.reset_index(drop=True)
                 st.metric("Showing Rejections", len(df))
                 
                 st.caption("Select rows to delete and click **💾 Save Changes** to clear them from Supabase cache.")
