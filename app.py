@@ -350,6 +350,7 @@ elif page == "📊 Airtable Tracker":
                         "Applied Date": fields.get("Applied Date", ""),
                         "Resume Name": fields.get("Resume Name", ""),
                         "JD Description": fields.get("JD Description", ""),
+                        "Apply Link": fields.get("Apply Link", ""),
                     })
                 offset = data.get("offset")
                 if not offset:
@@ -459,6 +460,10 @@ elif page == "📊 Airtable Tracker":
                         ),
                         "JD Description": st.column_config.TextColumn(
                             "JD Description",
+                            width="medium",
+                        ),
+                        "Apply Link": st.column_config.LinkColumn(
+                            "Apply Link",
                             width="medium",
                         ),
                     },
@@ -575,6 +580,9 @@ elif page == "📊 Airtable Tracker":
                                     if row["Applied Date"]:
                                         date_str = str(row["Applied Date"])[:10]
                                         st.caption(f"📅 {date_str}")
+                                        
+                                    if row.get("Apply Link"):
+                                        st.markdown(f"🔗 **[Apply Here]({row['Apply Link']})**")
                                         
                                     if row.get("JD Description"):
                                         with st.expander("📄 View JD", expanded=False):
