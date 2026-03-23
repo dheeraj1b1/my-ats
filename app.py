@@ -349,6 +349,7 @@ elif page == "📊 Airtable Tracker":
                         "Status": fields.get("Status", "Not Applied"),
                         "Applied Date": fields.get("Applied Date", ""),
                         "Resume Name": fields.get("Resume Name", ""),
+                        "JD Description": fields.get("JD Description", ""),
                     })
                 offset = data.get("offset")
                 if not offset:
@@ -455,6 +456,10 @@ elif page == "📊 Airtable Tracker":
                         "Match Score": st.column_config.NumberColumn(
                             "Match Score",
                             format="%d%%",
+                        ),
+                        "JD Description": st.column_config.TextColumn(
+                            "JD Description",
+                            width="medium",
                         ),
                     },
                     num_rows="dynamic",
@@ -570,6 +575,10 @@ elif page == "📊 Airtable Tracker":
                                     if row["Applied Date"]:
                                         date_str = str(row["Applied Date"])[:10]
                                         st.caption(f"📅 {date_str}")
+                                        
+                                    if row.get("JD Description"):
+                                        with st.expander("📄 View JD", expanded=False):
+                                            st.text(row["JD Description"])
 
                                     # Status changer
                                     current_idx = STATUS_OPTIONS.index(status) if status in STATUS_OPTIONS else 0
