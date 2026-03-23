@@ -381,9 +381,9 @@ elif page == "📊 Airtable Tracker":
             df = pd.DataFrame(records)
             df["Match Score"] = pd.to_numeric(df["Match Score"], errors="coerce").fillna(0).astype(int)
 
-            # ── Filters ──
-            with st.expander("🔍 Filter Applications", expanded=False):
-                f_col1, f_col2 = st.columns(2)
+            # ── Filters & Sorting ──
+            with st.expander("🔍 Filter & Sort Applications", expanded=False):
+                f_col1, f_col2, f_col3 = st.columns([2, 2, 1])
                 with f_col1:
                     search_query = st.text_input("Search Company or Role", key="tracker_search")
                 with f_col2:
@@ -393,6 +393,20 @@ elif page == "📊 Airtable Tracker":
                         default=STATUS_OPTIONS,
                         key="tracker_status_filter"
                     )
+                with f_col3:
+                    sort_by = st.selectbox(
+                        "Sort By",
+                        options=[
+                            "Date (Newest)", 
+                            "Date (Oldest)", 
+                            "Company (A-Z)", 
+                            "Company (Z-A)", 
+                            "Score (High-Low)", 
+                            "Score (Low-High)"
+                        ],
+                        index=0,
+                        key="tracker_sort"
+                    )
 
             if search_query:
                 df = df[
@@ -401,6 +415,20 @@ elif page == "📊 Airtable Tracker":
                 ]
             if status_filter:
                 df = df[df["Status"].isin(status_filter)]
+
+            # ── Sorting ──
+            if sort_by == "Date (Newest)":
+                df = df.sort_values(by="Applied Date", ascending=False)
+            elif sort_by == "Date (Oldest)":
+                df = df.sort_values(by="Applied Date", ascending=True)
+            elif sort_by == "Company (A-Z)":
+                df = df.sort_values(by="Company", ascending=True)
+            elif sort_by == "Company (Z-A)":
+                df = df.sort_values(by="Company", ascending=False)
+            elif sort_by == "Score (High-Low)":
+                df = df.sort_values(by="Match Score", ascending=False)
+            elif sort_by == "Score (Low-High)":
+                df = df.sort_values(by="Match Score", ascending=True)
 
             df = df.reset_index(drop=True)
             st.metric("Showing Applications", len(df))
@@ -589,21 +617,45 @@ elif page == "🗄️ Supabase Viewer":
             rows = fetch_tier1_rejections(supabase_client)
             if rows:
                 df = pd.DataFrame(rows)
-                # Ensure the dataframe is sorted by most recently rejected first
-                if "created_at" in df.columns:
-                    df = df.sort_values(by="created_at", ascending=False)
                     
-                # ── Filters ──
-                with st.expander("🔍 Filter Rejections", expanded=False):
-                    search_query = st.text_input("Search Company, Title, or Reason", key="supa_search")
+                # ── Filters & Sorting ──
+                with st.expander("🔍 Filter & Sort Rejections", expanded=False):
+                    f_col1, f_col2 = st.columns([2, 1])
+                    with f_col1:
+                        search_query = st.text_input("Search Company, Title, or Reason", key="supa_search")
+                    with f_col2:
+                        sort_by_supa = st.selectbox(
+                            "Sort By",
+                            options=[
+                                "Date (Newest)", 
+                                "Date (Oldest)", 
+                                "Company (A-Z)", 
+                                "Company (Z-A)"
+                            ],
+                            index=0,
+                            key="supa_sort"
+                        )
                 
                 if search_query:
                     # we do a combined mask across standard columns if they exist
                     mask = pd.Series(False, index=df.index)
-                    for col in ["company", "title", "reason"]:
+                    for col in ["company", "company_name", "title", "job_title", "reason"]:
                         if col in df.columns:
                             mask = mask | df[col].str.contains(search_query, case=False, na=False)
                     df = df[mask]
+
+                # ── Sorting ──
+                date_col = "created_at" if "created_at" in df.columns else ("rejected_at" if "rejected_at" in df.columns else None)
+                comp_col = "company_name" if "company_name" in df.columns else ("company" if "company" in df.columns else None)
+                
+                if sort_by_supa == "Date (Newest)" and date_col:
+                    df = df.sort_values(by=date_col, ascending=False)
+                elif sort_by_supa == "Date (Oldest)" and date_col:
+                    df = df.sort_values(by=date_col, ascending=True)
+                elif sort_by_supa == "Company (A-Z)" and comp_col:
+                    df = df.sort_values(by=comp_col, ascending=True)
+                elif sort_by_supa == "Company (Z-A)" and comp_col:
+                    df = df.sort_values(by=comp_col, ascending=False)
 
                 df = df.reset_index(drop=True)
                 st.metric("Showing Rejections", len(df))
@@ -731,6 +783,8 @@ elif page == "✂️ Resume Studio":
                             f"/ {DAILY_LIMIT} ({remaining} remaining)"
                         )
 
+                        save_to_vault = st.checkbox("☁️ Automatically save tailored resume to Supabase Vault", value=True)
+
                         # Tailor button
                         if st.button("✂️ Tailor Resume", key="tailor_btn"):
                             if not api_key:
@@ -761,8 +815,9 @@ elif page == "✂️ Resume Studio":
 
                                     # Save modified DOCX and offer download
                                     doc_bytes = save_doc_to_bytes(doc)
-                                    company_slug = selected_job["company"].replace(" ", "_")[:20]
-                                    filename = f"Tailored_Resume_{company_slug}.docx"
+                                    company_slug = selected_job["company"].replace(" ", "_").replace("/", "-")[:20]
+                                    timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+                                    filename = f"Tailored_Resume_{company_slug}_{timestamp_str}.docx"
 
                                     st.download_button(
                                         label="⬇️ Download Tailored Resume (.docx)",
@@ -771,6 +826,26 @@ elif page == "✂️ Resume Studio":
                                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                                         key="tailor_download",
                                     )
+
+                                    if save_to_vault:
+                                        if not supabase_client:
+                                            st.warning("⚠️ Supabase credentials needed to save to Vault. Set them in the sidebar.")
+                                        else:
+                                            with st.spinner(f"Uploading {filename} to Supabase..."):
+                                                try:
+                                                    supabase_client.storage.from_("tailored_resumes").upload(
+                                                        file=doc_bytes,
+                                                        path=filename,
+                                                        file_options={
+                                                            "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 
+                                                            "x-upsert": "true"
+                                                        }
+                                                    )
+                                                    public_url = supabase_client.storage.from_("tailored_resumes").get_public_url(filename)
+                                                    st.success(f"✅ Saved to Vault as **{filename}**!")
+                                                    st.markdown(f"🔗 **[Download from Vault]({public_url})**")
+                                                except Exception as e:
+                                                    st.error(f"Failed to upload to Supabase: {e}")
                                 else:
                                     st.error("Tailoring failed. See error messages above.")
             elif tailor_file and not selected_job["jd_description"]:
@@ -873,6 +948,36 @@ elif page == "☁️ Document Vault":
                 })
             
             vault_df = pd.DataFrame(file_data)
+            
+            # ── Sorting ──
+            sort_by_vault = st.selectbox(
+                "Sort Documents By",
+                options=[
+                    "Date (Newest)", 
+                    "Date (Oldest)", 
+                    "Filename (A-Z)", 
+                    "Filename (Z-A)", 
+                    "Size (Largest)", 
+                    "Size (Smallest)"
+                ],
+                index=0,
+                key="vault_sort"
+            )
+
+            if sort_by_vault == "Date (Newest)":
+                vault_df = vault_df.sort_values(by="Created At", ascending=False)
+            elif sort_by_vault == "Date (Oldest)":
+                vault_df = vault_df.sort_values(by="Created At", ascending=True)
+            elif sort_by_vault == "Filename (A-Z)":
+                vault_df = vault_df.sort_values(by="Filename", ascending=True)
+            elif sort_by_vault == "Filename (Z-A)":
+                vault_df = vault_df.sort_values(by="Filename", ascending=False)
+            elif sort_by_vault == "Size (Largest)":
+                vault_df = vault_df.sort_values(by="Size (KB)", ascending=False)
+            elif sort_by_vault == "Size (Smallest)":
+                vault_df = vault_df.sort_values(by="Size (KB)", ascending=True)
+
+            vault_df = vault_df.reset_index(drop=True)
             
             st.caption("Select rows to delete and click **💾 Delete Selected Files** to free up storage.")
             
