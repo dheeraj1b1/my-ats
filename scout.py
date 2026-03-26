@@ -26,9 +26,9 @@ from prompts import MASTER_PROMPT
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 SEARCH_KEYWORDS = "SDET OR Automation Engineer OR Quality Assurance Engineer OR Software Engineer in Test OR Test Automation Engineer OR QA Automation Engineer OR QA Engineer OR Test Engineer OR QA Engineer OR Test Engineer NOT Junior NOT Fresher NOT Intern NOT Trainee"
-TARGET_CITIES = ["Bangalore", "Chennai", "Hyderabad"]
-JOBS_PER_CITY = 60
-TIER1_THRESHOLD = 30
+TARGET_CITIES = ["Bangalore"]
+JOBS_PER_CITY = 80
+TIER1_THRESHOLD = 28
 TIER2_THRESHOLD = 80
 GEMINI_SLEEP = 90         # Sleep before each Gemini call (1 minute)
 GEMINI_RETRY_SLEEP = 180  # Sleep on 429 before retry
