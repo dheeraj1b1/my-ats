@@ -70,6 +70,30 @@ def normalize_company(name: str) -> str:
     return name
 
 
+def normalize_title(title: str) -> str:
+    """Lowercase, remove punctuation, and strip noise words."""
+    title = title.lower()
+    title = re.sub(r'[^\w\s]', ' ', title)
+    
+    noise_words = [
+        "senior", "sr", "junior", "jr", "lead", "associate", "contract", 
+        "remote", "onsite", "hybrid", "walkin", "urgent", "dna", "atc", "gig", "now"
+    ]
+    
+    for word in noise_words:
+        title = re.sub(r'\b' + re.escape(word) + r'\b', ' ', title)
+        
+    title = re.sub(r'\s+', ' ', title).strip()
+    return title
+
+
+def extract_linkedin_job_id(url: str) -> str:
+    """Extract trailing numeric LinkedIn Job ID from URL."""
+    if not url:
+        return ""
+    match = re.search(r'-(\d{9,12})(?:[/?]|$)', url)
+    return match.group(1) if match else ""
+
 RECRUITER_BLACKLIST = [
     "viraaj hr", "grid career", "vidpro hr",
     "sourcingxpress", "peopleprime", "people prime",
@@ -357,25 +381,29 @@ def purge_old_rejections(supabase_client):
 
 
 def get_rejected_jobs(supabase_client):
-    """Fetch all rejected jobs from Supabase into a set of URLs and a set of (company, title) tuples."""
+    """Fetch all rejected jobs from Supabase into sets of URLs, roles, and job IDs."""
     rejected_urls = set()
     rejected_roles = set()
+    rejected_job_ids = set()
     try:
         result = supabase_client.table("tier1_rejections").select("job_url, company_name, job_title").execute()
         for row in result.data or []:
             url = row.get("job_url", "")
             if url:
                 rejected_urls.add(url.split('?')[0])
+                ext_id = extract_linkedin_job_id(url)
+                if ext_id:
+                    rejected_job_ids.add(ext_id)
                 
             comp = row.get("company_name", "")
             title = row.get("job_title", "")
             if comp and title:
-                rejected_roles.add((normalize_company(comp), title.lower()))
+                rejected_roles.add((normalize_company(comp), normalize_title(title)))
                 
         print(f"   ✅ Found {len(result.data or [])} previously rejected jobs in Supabase")
     except Exception as e:
         print(f"   ⚠️ Failed to fetch rejected jobs: {e}")
-    return rejected_urls, rejected_roles
+    return rejected_urls, rejected_roles, rejected_job_ids
 
 
 def insert_rejection(supabase_client, job):
@@ -393,12 +421,13 @@ def insert_rejection(supabase_client, job):
 # ─── Airtable: Duplicate Checker ────────────────────────────────────────────
 
 def get_airtable_jobs(airtable_token):
-    """Fetch existing Apply Link URLs and Roles from Airtable (Not Applied + Applied)."""
+    """Fetch existing Apply Link URLs, Job IDs, and Roles from Airtable (ALL statuses)."""
     url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/{AIRTABLE_TABLE_NAME}"
     headers = {"Authorization": f"Bearer {airtable_token}"}
 
     existing_urls = set()
     existing_roles = set()
+    existing_job_ids = set()
     offset = None
 
     print("\n🔍 Checking Airtable for existing jobs...")
@@ -421,19 +450,25 @@ def get_airtable_jobs(airtable_token):
             status = fields.get("Status", "")
             company = fields.get("Company", "")
             role = fields.get("Role", "")
-            
-            if apply_link and status in ("Not Applied", "Applied", "Rejected"):
-                existing_urls.add(apply_link.split('?')[0])
-            if company and role and status in ("Not Applied", "Applied", "Rejected"):
-                existing_roles.add((normalize_company(company), role.lower()))
+            job_id_field = str(fields.get("Job ID", "")).strip()
+
+            if status in ("Not Applied", "Applied", "Rejected", "In Progress", "Selected", "closed"):
+                if apply_link:
+                    existing_urls.add(apply_link.split('?')[0])
+                    ext_id = extract_linkedin_job_id(apply_link)
+                    if ext_id:
+                        existing_job_ids.add(ext_id)
+                if company and role:
+                    existing_roles.add((normalize_company(company), normalize_title(role)))
+                if job_id_field:
+                    existing_job_ids.add(job_id_field)
 
         offset = data.get("offset")
         if not offset:
             break
 
-    total_found = len(existing_urls) + len(existing_roles)
-    print(f"   ✅ Found {total_found} existing tracking points in Airtable")
-    return existing_urls, existing_roles
+    print(f"   ✅ Found Airtable: {len(existing_urls)} URLs, {len(existing_roles)} Roles, {len(existing_job_ids)} Job IDs")
+    return existing_urls, existing_roles, existing_job_ids
 
 
 # ─── Airtable: Push ─────────────────────────────────────────────────────────
@@ -451,8 +486,10 @@ def push_to_airtable(job, score, missing_details, airtable_token, resume_version
     ist_now = datetime.datetime.now(IST)
     applied_date_ist = ist_now.isoformat()
 
+    job_id = extract_linkedin_job_id(job["apply_link"])
     data = {
         "fields": {
+            "Job ID": job_id,
             "Company": job["company"],
             "Role": job["title"],
             "Match Score": score,
@@ -520,11 +557,11 @@ def main():
         return
 
     # Step 3: Fetch existing Airtable records for deduplication
-    existing_urls, existing_roles = get_airtable_jobs(airtable_token)
+    existing_urls, existing_roles, existing_job_ids = get_airtable_jobs(airtable_token)
 
     # Step 3b: Fetch Supabase rejection cache
     print("\n🔍 Checking Supabase rejection cache...")
-    rejected_urls, rejected_roles = get_rejected_jobs(supabase)
+    rejected_urls, rejected_roles, rejected_job_ids = get_rejected_jobs(supabase)
 
     # Step 4: Two-Tier Scoring
     print("\n" + "=" * 60)
@@ -539,21 +576,42 @@ def main():
         "pushed": 0,
     }
 
+    seen_this_run = set()
+
     for i, job in enumerate(jobs):
         print(f"\n── [{i+1}/{len(jobs)}] {job['title']} at {job['company']} ({job['city']})")
 
         # ── Dedup Check (Airtable + Supabase) ──
         clean_url = job["apply_link"].split('?')[0] if job["apply_link"] else ""
-        role_tuple = (normalize_company(job["company"]), job["title"].lower())
+        job_id = extract_linkedin_job_id(job["apply_link"])
+        role_key = (normalize_company(job["company"]), normalize_title(job["title"]))
         
+        # Layer 1-3
+        is_dup_id = bool(job_id and (job_id in existing_job_ids or job_id in rejected_job_ids))
         is_dup_url = clean_url and (clean_url in existing_urls or clean_url in rejected_urls)
-        is_dup_role = role_tuple[0] != "unknown" and role_tuple[1] != "unknown" and (role_tuple in existing_roles or role_tuple in rejected_roles)
+        is_dup_role = role_key[0] != "unknown" and role_key[1] != "" and (role_key in existing_roles or role_key in rejected_roles)
 
-        if is_dup_url or is_dup_role:
-            reason = "URL matched" if is_dup_url else "Company & Role matched"
+        if is_dup_id or is_dup_url or is_dup_role:
+            if is_dup_id:
+                reason = "Job ID matched"
+            elif is_dup_url:
+                reason = "URL matched"
+            else:
+                reason = "Company & Role matched"
             print(f"   ⏭️ Skipping {job['company']} - Already logged/rejected ({reason})")
             stats["duplicates"] += 1
             continue
+
+        # Layer 4 (In-run dedup)
+        if (job_id and job_id in seen_this_run) or role_key in seen_this_run:
+            print(f"   ⏭️ Skipping {job['company']} - Already seen this run")
+            stats["duplicates"] += 1
+            continue
+            
+        if job_id:
+            seen_this_run.add(job_id)
+        if role_key[1]:
+            seen_this_run.add(role_key)
 
         # ── Recruiter / Agency Blacklist ──
         if normalize_company(job["company"]) in RECRUITER_BLACKLIST:
