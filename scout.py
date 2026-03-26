@@ -267,6 +267,108 @@ def scrape_linkedin_jobs():
     return all_jobs
 
 
+def scrape_google_jobs():
+    all_jobs = []
+    search_results = []
+    
+    print("\n🔎 Scraping jobs from Google (max 80)...")
+    base_query = 'SDET OR "QA Automation Engineer" OR "Test Automation Engineer" Bangalore jobs'
+    
+    bad_domains = [
+        "linkedin.com", "shine.com", "timesjobs.com", "monster.com", 
+        "freshersworld.com", "placementindia.com", "hirist.com", "instahyre.com"
+    ]
+    
+    for start in [0, 30, 60]:
+        if len(search_results) >= 80:
+            break
+            
+        params = {"q": base_query, "num": 30, "start": start}
+        url = "https://www.google.com/search?" + urllib.parse.urlencode(params)
+        print(f"   URL: {url}")
+        
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            print(f"   ⚠️ Failed to fetch Google page {start}: {e}")
+            break
+            
+        soup = BeautifulSoup(resp.text, "html.parser")
+        
+        for g in soup.find_all("div", class_="g"):
+            if len(search_results) >= 80:
+                break
+                
+            a_tag = g.find("a", href=True)
+            if not a_tag:
+                continue
+                
+            href = a_tag["href"]
+            if href.startswith("/url?q="):
+                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                if "q" in parsed:
+                    href = parsed["q"][0]
+            apply_link = href
+            
+            if any(domain in apply_link.lower() for domain in bad_domains):
+                continue
+                
+            title_tag = g.find("h3")
+            title = title_tag.get_text(strip=True) if title_tag else "Unknown"
+            if title == "Unknown":
+                continue
+                
+            company = "Unknown"
+            if " at " in title.lower():
+                parts = re.split(r'\s+at\s+', title, flags=re.IGNORECASE)
+                if len(parts) > 1:
+                    company = parts[-1].split("-")[0].split("|")[0].strip()
+            elif "-" in title:
+                company = title.split("-")[-1].strip()
+            elif "|" in title:
+                company = title.split("|")[0].strip()
+                
+            search_results.append({
+                "title": title,
+                "company": company,
+                "apply_link": apply_link,
+                "city": "Bangalore",
+                "source": "google",
+                "description": ""
+            })
+            
+        time.sleep(random.uniform(3.5, 5.5))
+        
+    print(f"\n📝 Fetching full descriptions for {len(search_results)} Google jobs...")
+    for i, job in enumerate(search_results):
+        try:
+            resp = requests.get(job["apply_link"], headers=HEADERS, timeout=15)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for script_or_style in soup(["script", "style", "nav", "header", "footer"]):
+                    script_or_style.extract()
+                    
+                desc_text = soup.get_text(separator="\n", strip=True)
+                
+                if len(desc_text) < 200:
+                    print(f"   [{i+1}/{len(search_results)}] ⏭️ Skipping {job['title']} — description too short ({len(desc_text)} chars)")
+                    continue
+                    
+                job["description"] = desc_text
+                print(f"   [{i+1}/{len(search_results)}] ✅ {job['title']} at {job['company']} — {len(desc_text)} chars")
+                all_jobs.append(job)
+            else:
+                print(f"   [{i+1}/{len(search_results)}] ⚠️ HTTP {resp.status_code} for {job['title']}")
+        except Exception as e:
+            print(f"   [{i+1}/{len(search_results)}] ⚠️ Failed to fetch {job['title']}: {e}")
+            
+        time.sleep(random.uniform(3.5, 5.5))
+        
+    print(f"\n✅ Total valid Google jobs scraped: {len(all_jobs)}")
+    return all_jobs
+
+
 # ─── Tier 1: Local Keyword Bouncer ──────────────────────────────────────────
 
 def calculate_ats_score(resume_text, jd_text):
@@ -552,9 +654,15 @@ def main():
 
     # Step 2: Scrape LinkedIn
     jobs = scrape_linkedin_jobs()
+
+    # Step 2b: Scrape Google
+    jobs += scrape_google_jobs()
+
     if not jobs:
         print("\n⚠️ No jobs were scraped. Exiting pipeline.")
         return
+
+    print(f"\n✅ Total job count from both sources before deduplication: {len(jobs)}")
 
     # Step 3: Fetch existing Airtable records for deduplication
     existing_urls, existing_roles, existing_job_ids = get_airtable_jobs(airtable_token)
