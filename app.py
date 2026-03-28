@@ -6,6 +6,13 @@ import datetime
 import pytz
 import requests
 import pandas as pd
+import re
+import os
+import base64
+import importlib.util
+import sys
+from pathlib import Path
+from email.mime.text import MIMEText
 from supabase import create_client, Client
 
 from tailor import (
@@ -35,6 +42,39 @@ def extract_text_from_file(file):
         for para in doc.paragraphs:
             text += para.text + "\n"
     return text
+
+
+def load_module_from_path(module_name: str, module_path: Path):
+    """Load a Python module from a specific file path."""
+    spec = importlib.util.spec_from_file_location(module_name, str(module_path))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load module: {module_name}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@st.cache_resource(show_spinner=False)
+def load_job_curator_pipeline():
+    """Load job_curator modules without changing files inside job_curator/."""
+    job_curator_app_dir = Path(__file__).resolve().parent / "job_curator" / "app"
+    if not job_curator_app_dir.exists():
+        raise FileNotFoundError(f"Missing directory: {job_curator_app_dir}")
+
+    config_mod = load_module_from_path("app.config", job_curator_app_dir / "config.py")
+    parser_mod = load_module_from_path("app.parser", job_curator_app_dir / "parser.py")
+    exp_mod = load_module_from_path("app.experience_parser", job_curator_app_dir / "experience_parser.py")
+    rules_mod = load_module_from_path("app.rules", job_curator_app_dir / "rules.py")
+    refiner_mod = load_module_from_path("app.refiner", job_curator_app_dir / "refiner.py")
+
+    return {
+        "max_upload_files": getattr(config_mod, "MAX_UPLOAD_FILES", 6),
+        "extract_blocks_from_pdf": parser_mod.extract_blocks_from_pdf,
+        "extract_experience_years": exp_mod.extract_experience_years,
+        "evaluate_job_block": rules_mod.evaluate_job_block,
+        "refine_job_batch": refiner_mod.refine_job_batch,
+    }
 
 
 # ─── Page Config ─────────────────────────────────────────────────────────────
@@ -102,7 +142,9 @@ with st.sidebar:
             "📊 Airtable Tracker",
             "🗄️ Supabase Viewer",
             "✂️ Resume Studio",
+            "📄 Job Curator",
             "☁️ Document Vault",
+            "📧 Mail Drafter",
         ],
         key="nav_radio",
     )
@@ -872,6 +914,215 @@ elif page == "✂️ Resume Studio":
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 📄 JOB CURATOR — PDF Batch Curation + Airtable Push
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "📄 Job Curator":
+    st.header("📄 Job Curator")
+    st.caption("Upload PDF job dumps, apply deterministic QA/SDET filters, and push selected jobs to Airtable.")
+
+    try:
+        jc_pipeline = load_job_curator_pipeline()
+        max_upload_files = jc_pipeline["max_upload_files"]
+        extract_blocks_from_pdf = jc_pipeline["extract_blocks_from_pdf"]
+        extract_experience_years = jc_pipeline["extract_experience_years"]
+        evaluate_job_block = jc_pipeline["evaluate_job_block"]
+        refine_job_batch = jc_pipeline["refine_job_batch"]
+    except Exception as e:
+        st.error(f"Failed to load Job Curator modules: {e}")
+        st.stop()
+
+    upload_col, info_col = st.columns([2, 1])
+    with upload_col:
+        uploaded_pdfs = st.file_uploader(
+            "Upload up to 6 PDF files",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="jc_pdf_uploads",
+        )
+    with info_col:
+        st.metric("Max PDFs", max_upload_files)
+        st.metric("Uploaded", len(uploaded_pdfs) if uploaded_pdfs else 0)
+
+    if uploaded_pdfs and len(uploaded_pdfs) > max_upload_files:
+        st.error(f"Too many PDFs uploaded. Maximum allowed is {max_upload_files}.")
+
+    parse_col, clear_col = st.columns(2)
+    with parse_col:
+        parse_clicked = st.button("Parse & Filter Jobs", key="jc_parse_btn", use_container_width=True)
+    with clear_col:
+        clear_clicked = st.button("Clear Curated Results", key="jc_clear_btn", use_container_width=True)
+
+    if clear_clicked:
+        st.session_state.pop("jc_results_df", None)
+        st.session_state.pop("jc_stage1_total", None)
+        st.session_state.pop("jc_selected_total", None)
+        st.rerun()
+
+    if parse_clicked:
+        if not uploaded_pdfs:
+            st.warning("Upload at least 1 PDF file to continue.")
+        elif len(uploaded_pdfs) > max_upload_files:
+            st.warning(f"Please keep uploads within {max_upload_files} PDFs.")
+        else:
+            stage1_results = []
+            total_blocks = 0
+
+            with st.spinner("Parsing PDFs and applying filters..."):
+                for pdf_file in uploaded_pdfs:
+                    pdf_bytes = pdf_file.getvalue()
+                    blocks = extract_blocks_from_pdf(pdf_bytes, pdf_file.name)
+                    total_blocks += len(blocks)
+
+                    for idx, block_text in enumerate(blocks, 1):
+                        exp_min, exp_max = extract_experience_years(block_text)
+                        evaluation = evaluate_job_block(block_text, exp_min, exp_max)
+                        stage1_results.append(
+                            {
+                                "Source_PDF": pdf_file.name,
+                                "Block_ID": idx,
+                                "Exp_Min": exp_min,
+                                "Exp_Max": exp_max,
+                                "Raw_Text": block_text,
+                                **evaluation,
+                            }
+                        )
+
+                refined_batch = refine_job_batch(stage1_results)
+                selected_stage1 = [row for row in stage1_results if row.get("status") == "Selected"]
+
+                enriched_jobs = []
+                for idx, job in enumerate(refined_batch):
+                    enriched = dict(job)
+                    if idx < len(selected_stage1):
+                        enriched["Raw_Text"] = selected_stage1[idx].get("Raw_Text", "")
+                    enriched_jobs.append(enriched)
+
+                deduped_jobs = []
+                seen_keys = set()
+                for job in enriched_jobs:
+                    key = (
+                        str(job.get("Company", "")).strip().lower(),
+                        str(job.get("Role", "")).strip().lower(),
+                        str(job.get("Email", "")).strip().lower(),
+                    )
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    deduped_jobs.append(job)
+
+                curated_rows = []
+                for job in deduped_jobs:
+                    curated_rows.append(
+                        {
+                            "Company": job.get("Company", ""),
+                            "Role": job.get("Role", ""),
+                            "Exp": job.get("Exp", ""),
+                            "Location": job.get("Location", ""),
+                            "Email": job.get("Email", ""),
+                            "Notes": job.get("Notes", ""),
+                            "Domain": job.get("Domain", ""),
+                            "Raw_Text": job.get("Raw_Text", ""),
+                            "Source_PDF": job.get("Source_PDF", ""),
+                        }
+                    )
+
+            st.session_state["jc_results_df"] = pd.DataFrame(curated_rows).reset_index(drop=True)
+            st.session_state["jc_stage1_total"] = total_blocks
+            st.session_state["jc_selected_total"] = len(curated_rows)
+
+    results_df = st.session_state.get("jc_results_df")
+    if isinstance(results_df, pd.DataFrame):
+        display_cols = ["Company", "Role", "Exp", "Location", "Email", "Notes", "Domain"]
+
+        metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
+        with metrics_col1:
+            st.metric("Total Blocks Parsed", int(st.session_state.get("jc_stage1_total", 0)))
+        with metrics_col2:
+            st.metric("Filtered Jobs", int(st.session_state.get("jc_selected_total", len(results_df))))
+        with metrics_col3:
+            st.metric("Ready to Push", int(len(results_df)))
+
+        if results_df.empty:
+            st.info("No jobs matched the filter criteria.")
+        else:
+            st.subheader("Filtered Jobs")
+            st.dataframe(results_df[display_cols], use_container_width=True, hide_index=True)
+
+            st.subheader("Select Jobs to Push")
+            selection_df = results_df[display_cols].copy()
+            selection_df.insert(0, "Select", False)
+
+            edited_selection = st.data_editor(
+                selection_df,
+                column_config={
+                    "Select": st.column_config.CheckboxColumn("Push", default=False),
+                },
+                width="stretch",
+                hide_index=True,
+                key="jc_selection_editor",
+            )
+
+            selected_indices = edited_selection.index[edited_selection["Select"]].tolist()
+            push_col1, push_col2 = st.columns([1, 2])
+            with push_col1:
+                st.caption(f"Selected: {len(selected_indices)}")
+            with push_col2:
+                push_clicked = st.button(
+                    "Push Selected to Airtable",
+                    key="jc_push_btn",
+                    use_container_width=True,
+                    disabled=len(selected_indices) == 0,
+                )
+
+            if push_clicked:
+                if not airtable_base_id or not airtable_token:
+                    st.warning("Airtable credentials are required. Set them in the sidebar.")
+                else:
+                    selected_jobs = results_df.iloc[selected_indices]
+                    ist_tz = pytz.timezone("Asia/Kolkata")
+                    applied_time = datetime.datetime.now(ist_tz).isoformat()
+                    success_count = 0
+                    fail_messages = []
+
+                    with st.spinner("Pushing selected jobs to Airtable..."):
+                        for _, row in selected_jobs.iterrows():
+                            recruiter_email = row.get("Email", "")
+                            job_exp = row.get("Exp", "")
+                            job_location = row.get("Location", "")
+                            job_domain = row.get("Domain", "")
+                            job_notes = row.get("Notes", "")
+                            fields = {
+                                "Company": row.get("Company", ""),
+                                "Role": row.get("Role", ""),
+                                "Status": "Not Applied",
+                                "Applied Date": applied_time,
+                                "JD Description": (
+                                    f"Recruiter: {recruiter_email}\n"
+                                    f"Exp: {job_exp}\n"
+                                    f"Location: {job_location}\n"
+                                    f"Domain: {job_domain}\n"
+                                    f"Notes: {job_notes}"
+                                ),
+                                "Resume Name": "Job Curator Import",
+                            }
+                            ok, msg = create_airtable_record(airtable_base_id, airtable_token, fields)
+                            if ok:
+                                success_count += 1
+                            else:
+                                fail_messages.append(f"{row.get('Company', 'Unknown')} - {row.get('Role', 'Unknown')}: {msg}")
+
+                    if success_count:
+                        st.success(f"Pushed {success_count} job(s) to Airtable with status 'Not Applied'.")
+                    if fail_messages:
+                        st.error("Some jobs could not be pushed.")
+                        for err in fail_messages[:5]:
+                            st.error(err)
+                        if len(fail_messages) > 5:
+                            st.error(f"...and {len(fail_messages) - 5} more failure(s).")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # ☁️ DOCUMENT VAULT — Placeholder for PDF storage
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -1028,3 +1279,249 @@ elif page == "☁️ Document Vault":
                         st.error(f"Failed to delete files: {e}")
                 else:
                     st.info("No files selected for deletion.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 📧 MAIL DRAFTER — AI Cold Outreach Email Generator + Gmail Drafts
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "📧 Mail Drafter":
+    st.header("📧 Mail Drafter")
+    st.caption("Draft professional cold outreach emails for 'Not Applied' jobs and save them to Gmail Drafts.")
+
+    if not airtable_base_id or not airtable_token:
+        st.warning("⚠️ Airtable credentials are required. Set them in the sidebar.")
+    else:
+        # ── Fetch 'Not Applied' jobs from Airtable ──
+        @st.cache_data(ttl=60, show_spinner="Fetching 'Not Applied' jobs...")
+        def fetch_not_applied_for_mail(_base_id, _token):
+            url = f"https://api.airtable.com/v0/{_base_id}/Applications"
+            headers = {"Authorization": f"Bearer {_token}"}
+            all_records = []
+            offset = None
+            while True:
+                params = {"filterByFormula": "{Status} = 'Not Applied'"}
+                if offset:
+                    params["offset"] = offset
+                resp = requests.get(url, headers=headers, params=params, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+                for rec in data.get("records", []):
+                    fields = rec.get("fields", {})
+                    all_records.append({
+                        "record_id": rec.get("id", ""),
+                        "Company": fields.get("Company", ""),
+                        "Role": fields.get("Role", ""),
+                        "JD Description": fields.get("JD Description", ""),
+                        "Apply Link": fields.get("Apply Link", ""),
+                    })
+                offset = data.get("offset")
+                if not offset:
+                    break
+            return all_records
+
+        if st.button("🔄 Refresh Jobs", key="mail_refresh"):
+            fetch_not_applied_for_mail.clear()
+            st.rerun()
+
+        try:
+            mail_jobs = fetch_not_applied_for_mail(airtable_base_id, airtable_token)
+        except Exception as e:
+            st.error(f"Failed to fetch Airtable records: {e}")
+            mail_jobs = []
+
+        if not mail_jobs:
+            st.info("No 'Not Applied' jobs found in Airtable. Run the Scout pipeline first.")
+        else:
+            job_labels = [f"{j['Company']} — {j['Role']}" for j in mail_jobs]
+            selected_idx = st.selectbox(
+                "Select a job to draft an email for:",
+                range(len(job_labels)),
+                format_func=lambda i: job_labels[i],
+                key="mail_job_select",
+            )
+
+            selected_job = mail_jobs[selected_idx]
+            jd_desc = selected_job.get("JD Description", "")
+
+            # ── Extract recruiter email from JD Description ──
+            recruiter_email = ""
+            email_match = re.search(r'Recruiter:\s*([\w.+-]+@[\w-]+\.[\w.-]+)', jd_desc)
+            if email_match:
+                recruiter_email = email_match.group(1)
+
+            # ── Show job details ──
+            st.subheader(f"{selected_job['Company']} — {selected_job['Role']}")
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.markdown(f"**Company:** {selected_job['Company']}")
+                st.markdown(f"**Role:** {selected_job['Role']}")
+                if recruiter_email:
+                    st.success(f"📧 Recruiter Email: **{recruiter_email}**")
+                else:
+                    st.warning("⚠️ No recruiter email found in JD Description")
+            with col2:
+                if selected_job.get("Apply Link"):
+                    st.markdown(f"🔗 **[Apply Link]({selected_job['Apply Link']})**")
+
+            with st.expander("📋 JD Description Preview", expanded=False):
+                if jd_desc:
+                    st.text(jd_desc[:2000])
+                else:
+                    st.info("No JD Description available.")
+
+            # ── Model call counters (session-scoped) ──
+            if "mail_model2_calls" not in st.session_state:
+                st.session_state["mail_model2_calls"] = 0
+            if "mail_model3_calls" not in st.session_state:
+                st.session_state["mail_model3_calls"] = 0
+
+            # ── Draft Email Button ──
+            if st.button("✍️ Draft Email", key="mail_draft_btn"):
+                if not api_key:
+                    st.warning("Please enter your Gemini API Key in the sidebar.")
+                elif not jd_desc:
+                    st.warning("No JD Description available for this job.")
+                else:
+                    # Load resume.txt
+                    resume_text = ""
+                    resume_path = os.path.join(os.path.dirname(__file__), "resume.txt")
+                    if os.path.exists(resume_path):
+                        with open(resume_path, "r", encoding="utf-8") as f:
+                            resume_text = f.read().strip()
+                    else:
+                        st.warning("⚠️ resume.txt not found. Drafting without resume context.")
+
+                    email_prompt = f"""You are a professional email writer for job applications.
+Write a short, professional cold outreach email for the following job.
+
+Rules:
+- Maximum 150 words
+- Mention the role "{selected_job['Role']}" and company "{selected_job['Company']}" by name
+- Highlight 2-3 relevant skills from the resume that match the job description
+- End with a clear call to action asking them to review the attached resume
+- Include a subject line at the top in the format: Subject: [subject text]
+- Tone: confident, concise, and professional
+- Do NOT use placeholder brackets like [Your Name] — use "Dheeraj" as the name
+
+Job Description:
+{jd_desc[:3000]}
+
+Resume:
+{resume_text[:3000]}
+"""
+
+                    genai.configure(api_key=api_key)
+                    drafted_email = None
+
+                    with st.spinner("🤖 Drafting email with AI..."):
+                        # Attempt 1: Primary Model
+                        try:
+                            st.toast("🚀 Using Model 1: gemini-3.1-flash-lite-preview")
+                            model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
+                            response = model.generate_content(email_prompt)
+                            drafted_email = response.text
+                        except Exception as e1:
+                            st.toast(f"⚠️ Model 1 failed: {e1}")
+
+                            # Attempt 2: Fallback Model 2
+                            if st.session_state["mail_model2_calls"] < 19:
+                                try:
+                                    st.toast("🔄 Using Model 2: gemini-2.5-flash")
+                                    model = genai.GenerativeModel("gemini-2.5-flash")
+                                    response = model.generate_content(email_prompt)
+                                    drafted_email = response.text
+                                except Exception as e2:
+                                    st.toast(f"❌ Model 2 failed: {e2}")
+                                finally:
+                                    st.session_state["mail_model2_calls"] += 1
+                            else:
+                                st.toast("⚠️ Model 2 limit (19) reached.")
+
+                            # Attempt 3: Fallback Model 3
+                            if drafted_email is None and st.session_state["mail_model3_calls"] < 19:
+                                try:
+                                    st.toast("🔄 Using Model 3: gemini-2.0-flash")
+                                    model = genai.GenerativeModel("gemini-2.0-flash")
+                                    response = model.generate_content(email_prompt)
+                                    drafted_email = response.text
+                                except Exception as e3:
+                                    st.toast(f"❌ Model 3 failed: {e3}")
+                                finally:
+                                    st.session_state["mail_model3_calls"] += 1
+                            elif drafted_email is None:
+                                st.toast("⚠️ Model 3 limit (19) reached.")
+
+                    if drafted_email:
+                        st.session_state["drafted_email"] = drafted_email
+                        st.session_state["draft_recruiter_email"] = recruiter_email
+                    else:
+                        st.error("❌ All models exhausted. Could not draft email.")
+
+            # ── Show drafted email for editing ──
+            if "drafted_email" in st.session_state:
+                st.subheader("📝 Drafted Email")
+                edited_email = st.text_area(
+                    "Edit the drafted email below:",
+                    value=st.session_state["drafted_email"],
+                    height=350,
+                    key="mail_email_editor",
+                )
+
+                draft_to = st.session_state.get("draft_recruiter_email", "")
+                if draft_to:
+                    st.info(f"📧 To: **{draft_to}**")
+                else:
+                    st.warning("⚠️ No recruiter email found in JD Description. You can manually enter one below.")
+                    draft_to = st.text_input("Enter recruiter email:", key="mail_manual_email")
+
+                # ── Save to Gmail Drafts ──
+                if st.button("📨 Save to Gmail Drafts", key="mail_gmail_btn"):
+                    if not draft_to:
+                        st.error("❌ No recruiter email provided. Cannot create Gmail draft.")
+                    else:
+                        try:
+                            import json
+                            from google.oauth2.credentials import Credentials
+                            from googleapiclient.discovery import build
+
+                            creds_dict = json.loads(st.secrets["GMAIL_CREDENTIALS"])
+                            creds = Credentials(
+                                token=creds_dict.get("token"),
+                                refresh_token=creds_dict.get("refresh_token"),
+                                token_uri=creds_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
+                                client_id=creds_dict.get("client_id"),
+                                client_secret=creds_dict.get("client_secret"),
+                                scopes=creds_dict.get("scopes", ["https://www.googleapis.com/auth/gmail.compose"]),
+                            )
+
+                            service = build("gmail", "v1", credentials=creds)
+
+                            # Extract subject line from email body
+                            email_body = edited_email
+                            subject = "Job Application"
+                            subject_match = re.search(r'Subject:\s*(.+)', edited_email)
+                            if subject_match:
+                                subject = subject_match.group(1).strip()
+                                # Remove subject line from body
+                                email_body = edited_email.replace(subject_match.group(0), "").strip()
+
+                            message = MIMEText(email_body)
+                            message["to"] = draft_to
+                            message["subject"] = subject
+
+                            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+                            draft = service.users().drafts().create(
+                                userId="me",
+                                body={"message": {"raw": raw_message}}
+                            ).execute()
+
+                            st.success(f"✅ Draft saved to Gmail! (Draft ID: {draft['id']})")
+                            st.balloons()
+
+                        except KeyError:
+                            st.error("❌ GMAIL_CREDENTIALS not found in Streamlit secrets. Add OAuth credentials to .streamlit/secrets.toml")
+                        except Exception as e:
+                            st.error(f"❌ Failed to save Gmail draft: {e}")

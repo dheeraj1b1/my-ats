@@ -65,3 +65,4 @@ uritemplate==4.2.0
 urllib3==2.6.3
 watchdog==6.0.0
 supabase
+google-auth-oauthlib

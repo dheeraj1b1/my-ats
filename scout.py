@@ -267,106 +267,87 @@ def scrape_linkedin_jobs():
     return all_jobs
 
 
-def scrape_google_jobs():
+def scrape_google_jobs(serpapi_key):
+    """
+    Scrapes jobs using SerpAPI Google Jobs engine.
+    Add SERPAPI_KEY to GitHub Actions secrets list.
+    """
+    if not serpapi_key:
+        print("\n⚠️ SERPAPI_KEY not found. Skipping Google jobs scrape.")
+        return []
+
     all_jobs = []
-    search_results = []
-    
-    print("\n🔎 Scraping jobs from Google (max 80)...")
-    base_query = 'SDET OR "QA Automation Engineer" OR "Test Automation Engineer" Bangalore jobs'
-    
+    print("\n🔎 Scraping jobs from Google (via SerpAPI)...")
+
     bad_domains = [
-        "linkedin.com", "shine.com", "timesjobs.com", "monster.com", 
+        "linkedin.com", "shine.com", "timesjobs.com", "monster.com",
         "freshersworld.com", "placementindia.com", "hirist.com", "instahyre.com"
     ]
-    
-    for start in [0, 30, 60]:
-        if len(search_results) >= 80:
-            break
-            
-        params = {"q": base_query, "num": 30, "start": start}
-        url = "https://www.google.com/search?" + urllib.parse.urlencode(params)
-        print(f"   URL: {url}")
-        
+
+    params = {
+        "engine": "google_jobs",
+        "q": "SDET OR QA Automation Engineer OR Test Automation Engineer Bangalore",
+        "api_key": serpapi_key,
+    }
+
+    url = "https://serpapi.com/search"
+    max_pages = 3
+
+    for page in range(max_pages):
+        print(f"   📄 Fetching page {page + 1}/{max_pages}...")
+
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=30)
+            resp = requests.get(url, params=params, timeout=30)
             resp.raise_for_status()
-        except requests.RequestException as e:
-            print(f"   ⚠️ Failed to fetch Google page {start}: {e}")
+            data = resp.json()
+        except Exception as e:
+            print(f"   ⚠️ Failed to fetch SerpAPI page {page + 1}: {e}")
             break
-            
-        soup = BeautifulSoup(resp.text, "html.parser")
-        
-        for g in soup.find_all("div", class_="g"):
-            if len(search_results) >= 80:
-                break
-                
-            a_tag = g.find("a", href=True)
-            if not a_tag:
+
+        jobs_results = data.get("jobs_results", [])
+        if not jobs_results:
+            print(f"   ⚠️ No results on page {page + 1}. Stopping.")
+            break
+
+        for job in jobs_results:
+            title = job.get("title", "Unknown")
+            company = job.get("company_name", "Unknown")
+            description = job.get("description", "")
+
+            apply_link = ""
+            options = job.get("apply_options", [])
+            if options:
+                apply_link = options[0].get("link", "")
+
+            if len(description) < 200:
                 continue
-                
-            href = a_tag["href"]
-            if href.startswith("/url?q="):
-                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-                if "q" in parsed:
-                    href = parsed["q"][0]
-            apply_link = href
-            
-            if any(domain in apply_link.lower() for domain in bad_domains):
+
+            if any(d in apply_link.lower() for d in bad_domains):
                 continue
-                
-            title_tag = g.find("h3")
-            title = title_tag.get_text(strip=True) if title_tag else "Unknown"
-            if title == "Unknown":
-                continue
-                
-            company = "Unknown"
-            if " at " in title.lower():
-                parts = re.split(r'\s+at\s+', title, flags=re.IGNORECASE)
-                if len(parts) > 1:
-                    company = parts[-1].split("-")[0].split("|")[0].strip()
-            elif "-" in title:
-                company = title.split("-")[-1].strip()
-            elif "|" in title:
-                company = title.split("|")[0].strip()
-                
-            search_results.append({
+
+            all_jobs.append({
                 "title": title,
                 "company": company,
                 "apply_link": apply_link,
                 "city": "Bangalore",
                 "source": "google",
-                "description": ""
+                "description": description
             })
-            
-        time.sleep(random.uniform(3.5, 5.5))
-        
-    print(f"\n📝 Fetching full descriptions for {len(search_results)} Google jobs...")
-    for i, job in enumerate(search_results):
-        try:
-            resp = requests.get(job["apply_link"], headers=HEADERS, timeout=15)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for script_or_style in soup(["script", "style", "nav", "header", "footer"]):
-                    script_or_style.extract()
-                    
-                desc_text = soup.get_text(separator="\n", strip=True)
-                
-                if len(desc_text) < 200:
-                    print(f"   [{i+1}/{len(search_results)}] ⏭️ Skipping {job['title']} — description too short ({len(desc_text)} chars)")
-                    continue
-                    
-                job["description"] = desc_text
-                print(f"   [{i+1}/{len(search_results)}] ✅ {job['title']} at {job['company']} — {len(desc_text)} chars")
-                all_jobs.append(job)
-            else:
-                print(f"   [{i+1}/{len(search_results)}] ⚠️ HTTP {resp.status_code} for {job['title']}")
-        except Exception as e:
-            print(f"   [{i+1}/{len(search_results)}] ⚠️ Failed to fetch {job['title']}: {e}")
-            
-        time.sleep(random.uniform(3.5, 5.5))
-        
+            print(f"   ✅ {title} at {company} — {len(description)} chars")
+
+        # Check for next page token
+        pagination = data.get("serpapi_pagination", {})
+        next_token = pagination.get("next_page_token")
+        if not next_token:
+            print(f"   ℹ️ No more pages available.")
+            break
+
+        params["next_page_token"] = next_token
+        time.sleep(1)
+
     print(f"\n✅ Total valid Google jobs scraped: {len(all_jobs)}")
     return all_jobs
+
 
 
 # ─── Tier 1: Local Keyword Bouncer ──────────────────────────────────────────
@@ -403,17 +384,18 @@ def calculate_ats_score(resume_text, jd_text):
     return final_score
 
 
-# ─── Tier 2: Gemini 3.1 Flash Lite Deep Scan ────────────────────────────────
+# ─── Tier 2: Gemini Deep Scan ────────────────────────────────────────
+
+model2_calls = 0
+model3_calls = 0
 
 def gemini_deep_scan(jd_text, resume_text, client):
     """
     Sends JD + Resume to gemini-3.1-flash-lite for contextual ATS scoring.
+    Cascades to gemini-2.5-flash and gemini-2.0-flash on any exception.
     Returns a tuple: (score, missing_details)
-
-    STRICT TIMERS:
-      - time.sleep(60) before every call (1 minute)
-      - time.sleep(180) + 1 retry on 429 errors
     """
+    global model2_calls, model3_calls
     prompt = MASTER_PROMPT.format(jd_text=jd_text, resume_text=resume_text)
 
     # STRICT: 60s sleep before every Gemini call
@@ -424,12 +406,10 @@ def gemini_deep_scan(jd_text, resume_text, client):
     def parse_gemini_response(text):
         try:
             score = 0
-            # Extract Score using the same text format from app.py
             if "MATCH_SCORE:" in text:
                 score_str = text.split("MATCH_SCORE:")[1].split("%")[0].strip()
                 score = int(score_str)
 
-            # Extract Missing Details as the rest of the text for Airtable Logging
             missing_details = text
             if "### Critical Missing Elements" in text:
                 missing_details = "### Critical Missing Elements" + text.split("### Critical Missing Elements")[1]
@@ -439,34 +419,52 @@ def gemini_deep_scan(jd_text, resume_text, client):
             print(f"      ⚠️ Parse error: {e}")
             return 0, ""
 
-    # First attempt
-    try:
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+    def attempt_generation(model_name):
+        return client.models.generate_content(
+            model=model_name,
             contents=prompt,
         )
+
+    # First attempt: Primary Model
+    try:
+        print("      🚀 Using Model 1: gemini-3.1-flash-lite-preview")
+        response = attempt_generation("gemini-3.1-flash-lite-preview")
         return parse_gemini_response(response.text)
 
     except Exception as e:
-        error_str = str(e)
+        print(f"      ⚠️ Model 1 failed ({e}). Attempting fallbacks...")
 
-        # Handle 429 rate limit — sleep 180s and retry once
-        if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-            print(f"      ⚠️ Hit 429 rate limit. Sleeping {GEMINI_RETRY_SLEEP}s and retrying...")
-            time.sleep(GEMINI_RETRY_SLEEP)
+        # Fallback 1: Model 2
+        if model2_calls < 19:
+            print(f"      🔄 Using Model 2: gemini-2.5-flash (Call {model2_calls + 1}/19)")
             try:
-                response = client.models.generate_content(
-                    model="gemini-3.1-flash-lite-preview",
-                    contents=prompt,
-                )
+                time.sleep(5)
+                response = attempt_generation("gemini-2.5-flash")
+                model2_calls += 1
                 return parse_gemini_response(response.text)
-            except Exception as retry_err:
-                print(f"      ❌ Retry also failed: {retry_err}")
-                return 0, ""
+            except Exception as fb1_err:
+                print(f"      ❌ Model 2 failed: {fb1_err}")
+                model2_calls += 1 # Ensure call attempt is counted
         else:
-            print(f"      ❌ Gemini error: {e}")
-            return 0, ""
+            print(f"      ⚠️ Model 2 limit (19) reached.")
 
+        # Fallback 2: Model 3
+        if model3_calls < 19:
+            print(f"      🔄 Using Model 3: gemini-2.0-flash (Call {model3_calls + 1}/19)")
+            try:
+                time.sleep(5)
+                response = attempt_generation("gemini-2.0-flash")
+                model3_calls += 1
+                return parse_gemini_response(response.text)
+            except Exception as fb2_err:
+                print(f"      ❌ Model 3 failed: {fb2_err}")
+                model3_calls += 1
+        else:
+            print(f"      ⚠️ Model 3 limit (19) reached.")
+
+        # All failed
+        print("      ❌ All models exhausted.")
+        return 0, ""
 
 # ─── Supabase: Rejection Cache ──────────────────────────────────────────────
 
@@ -631,6 +629,7 @@ def main():
     airtable_token = os.environ.get("AIRTABLE_TOKEN")
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_KEY")
+    serpapi_key = os.environ.get("SERPAPI_KEY")
 
     if not gemini_api_key:
         raise EnvironmentError("GEMINI_API_KEY environment variable is not set.")
@@ -655,8 +654,8 @@ def main():
     # Step 2: Scrape LinkedIn
     jobs = scrape_linkedin_jobs()
 
-    # Step 2b: Scrape Google
-    jobs += scrape_google_jobs()
+    # Step 2b: Scrape Google via SerpAPI
+    jobs += scrape_google_jobs(serpapi_key)
 
     if not jobs:
         print("\n⚠️ No jobs were scraped. Exiting pipeline.")
