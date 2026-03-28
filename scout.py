@@ -290,8 +290,8 @@ def scrape_google_jobs(serpapi_key):
             
         params = {
             "engine": "google_jobs",
-            "q": "SDET OR QA Automation Engineer OR Test Automation Engineer Bangalore",
-            "location": "Bangalore, Karnataka, India",
+            "q": "SDET OR QA Automation Engineer Bangalore",
+            "location": "Bangalore Karnataka India",
             "api_key": serpapi_key,
             "num": 10,
             "start": start
@@ -387,12 +387,11 @@ def calculate_ats_score(resume_text, jd_text):
 
 model2_calls = 0
 model3_calls = 0
-MAX_FALLBACK_CALLS = 9
 
 def gemini_deep_scan(jd_text, resume_text, client):
     """
     Sends JD + Resume to gemini-3.1-flash-lite for contextual ATS scoring.
-    Cascades to gemini-3.0-flash and gemini-2.5-flash-lite on 429/503 limits.
+    Cascades to gemini-2.5-flash and gemini-2.0-flash on any exception.
     Returns a tuple: (score, missing_details)
     """
     global model2_calls, model3_calls
@@ -427,55 +426,44 @@ def gemini_deep_scan(jd_text, resume_text, client):
 
     # First attempt: Primary Model
     try:
+        print("      🚀 Using Model 1: gemini-3.1-flash-lite-preview")
         response = attempt_generation("gemini-3.1-flash-lite-preview")
         return parse_gemini_response(response.text)
 
     except Exception as e:
-        error_str = str(e)
-        is_rate_limited = any(err in error_str for err in ["429", "503", "RESOURCE_EXHAUSTED"])
+        print(f"      ⚠️ Model 1 failed ({e}). Attempting fallbacks...")
 
-        if is_rate_limited:
-            print(f"      ⚠️ Primary model limit hit. Attempting fallbacks...")
-            
-            # Fallback 1
-            if model2_calls < MAX_FALLBACK_CALLS:
-                print(f"      🔄 Fallback 1: Gemini 3 Flash (Call {model2_calls + 1}/{MAX_FALLBACK_CALLS})")
-                try:
-                    time.sleep(5)
-                    response = attempt_generation("gemini-3.0-flash")
-                    model2_calls += 1
-                    return parse_gemini_response(response.text)
-                except Exception as fb1_err:
-                    print(f"      ❌ Fallback 1 failed: {fb1_err}")
-            else:
-                print(f"      ⚠️ Fallback 1 run limit ({MAX_FALLBACK_CALLS}) reached.")
-
-            # Fallback 2
-            if model3_calls < MAX_FALLBACK_CALLS:
-                print(f"      🔄 Fallback 2: Gemini 2.5 Flash Lite (Call {model3_calls + 1}/{MAX_FALLBACK_CALLS})")
-                try:
-                    time.sleep(5)
-                    response = attempt_generation("gemini-2.5-flash-lite")
-                    model3_calls += 1
-                    return parse_gemini_response(response.text)
-                except Exception as fb2_err:
-                    print(f"      ❌ Fallback 2 failed: {fb2_err}")
-            else:
-                print(f"      ⚠️ Fallback 2 run limit ({MAX_FALLBACK_CALLS}) reached.")
-
-            # Exhausted - Final Retry on Primary
-            print(f"      ⚠️ Fallbacks exhausted. Sleeping {GEMINI_RETRY_SLEEP}s and retrying primary...")
-            time.sleep(GEMINI_RETRY_SLEEP)
+        # Fallback 1: Model 2
+        if model2_calls < 19:
+            print(f"      🔄 Using Model 2: gemini-2.5-flash (Call {model2_calls + 1}/19)")
             try:
-                response = attempt_generation("gemini-3.1-flash-lite-preview")
+                time.sleep(5)
+                response = attempt_generation("gemini-2.5-flash")
+                model2_calls += 1
                 return parse_gemini_response(response.text)
-            except Exception as retry_err:
-                print(f"      ❌ Final primary retry failed: {retry_err}")
-                return 0, ""
+            except Exception as fb1_err:
+                print(f"      ❌ Model 2 failed: {fb1_err}")
+                model2_calls += 1 # Ensure call attempt is counted
         else:
-            print(f"      ❌ Gemini error: {e}")
-            return 0, ""
+            print(f"      ⚠️ Model 2 limit (19) reached.")
 
+        # Fallback 2: Model 3
+        if model3_calls < 19:
+            print(f"      🔄 Using Model 3: gemini-2.0-flash (Call {model3_calls + 1}/19)")
+            try:
+                time.sleep(5)
+                response = attempt_generation("gemini-2.0-flash")
+                model3_calls += 1
+                return parse_gemini_response(response.text)
+            except Exception as fb2_err:
+                print(f"      ❌ Model 3 failed: {fb2_err}")
+                model3_calls += 1
+        else:
+            print(f"      ⚠️ Model 3 limit (19) reached.")
+
+        # All failed
+        print("      ❌ All models exhausted.")
+        return 0, ""
 
 # ─── Supabase: Rejection Cache ──────────────────────────────────────────────
 

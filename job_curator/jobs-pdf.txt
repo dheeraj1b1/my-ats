@@ -1,0 +1,268 @@
+Shared by Job Curator - Join us on Telegram:  https://t.me/testingexperiencedopenings   
+This document is for Subscribed Members only. If you notice this is shared publicly by anyone  
+pls report to us on info@jobcurator.in or whatsapp +91 9014875399 
+�
+� Hiring Alert! 
+GlobalLogic is looking for a Test Architect in Hyderabad. 
+If you’re strong in automation, frameworks, and QA leadership — this role is for you! 
+�
+� For referrals or queries: ayan.sarkar@globallogic.com 
+#Hiring #QA #TestArchitect #globallogic 
+https://www.linkedin.com/posts/activity-7404138086974001152
+cLl4?utm_source=share&utm_medium=member_desktop&rcm=ACoAACkCjQwBqKVTuDlG0
+WDo276YwIzAY1hHiI8  
+============= 
+Position: Junior QA Engineer  
+Experience: 1–2 Years  
+Location: Nanakramguda, Hyderabad.  
+We are looking for a Junior QA Engineer with 1–2 years of experience in manual testing. The 
+candidate will help with test execution, defect reporting, and validating different user flows.  
+Job Responsibilities  
+Execute manual test cases for web and mobile applications.  
+Perform functionality, regression, and sanity testing- Identify and document bugs with clear 
+repro steps.  
+Validate workflows, UI behavior, and user flow consistency.  
+Test layouts, field validations, and data accuracy.  
+Work with developers to verify fixes.  
+Maintain test case execution status and documentation.  
+Requirements  - 1–2 years of QA experience  - Good understanding of manual testing concepts  - Ability to write and execute test cases  - Basic understanding of API testing  - Familiarity with bug tracking tools (Azure DevOps or JIRA)  - Good communication and documentation skills  
+Nice to Have  - Familiarity with SQL queries  - Knowledge of Postman for API testing  - Exposure to automation tools such as Playwright or Selenium 
+careers@cloudleap.com  
+https://www.linkedin.com/posts/suyog-annem1029_manualtesting-qaengineers-apitesting
+activity-7404145599022948352
+aPVO?utm_source=share&utm_medium=member_desktop&rcm=ACoAACkCjQwBqKVTuDlG
+0WDo276YwIzAY1hHiI8  
+============= 
+�
+� We’re Hiring! – #AutomationTest Engineer | Hyderabad 
+Shared by Job Curator - Join us on Telegram: https://t.me/testingexperiencedopenings   
+General 
+General 
+Shared by Job Curator - Join us on Telegram:  https://t.me/testingexperiencedopenings   
+This document is for Subscribed Members only. If you notice this is shared publicly by anyone  
+pls report to us on info@jobcurator.in or whatsapp +91 9014875399 
+�
+� Location: #Hyderabad 
+�
+�
+💻 Experience: 2 -3.5 years 
+�
+� Type: #ContracttoHire 
+⏳ Immediate Joiners Preferred 
+✨ What We’re Looking For: 
+Strong hands-on experience in #AutomationTesting 
+Proficiency in Selenium with #Java (or any other programming language) 
+Ability to write clean, efficient, and reusable automation scripts 
+Experience in building robust automation frameworks is a plus 
+�
+� Interested candidates can share their resume at: brindha@vrdella.com 
+============== 
+�
+� We are hiring – Mid QA Automation Engineer! 
+Skills Required: 
+✔ Playwright 
+✔ Automation 
+✔ Typescript 
+�
+� Experience: 3–5 Years 
+�
+� Location: Hyderabad / Chennai 
+�
+� Shift: General 
+Share your resume at bhavana.n@xcelhires.com 
+================= 
+Here's a sample job post for Automation Testing positions in multiple locations: 
+Job Title: Test Engineer 
+Locations:* Pune, Hyderabad, Bangalore, Chennai 
+Job Description: 
+We're looking for skilled Automation Test Engineers to join our team in Pune, Hyderabad, 
+Bangalore, or Chennai. As an Automation Test Engineer, you'll be responsible for designing, 
+developing, and executing automated tests to ensure the quality of our software 
+applications. 
+Key Responsibilities: 
+Design and develop automated tests using tools like Selenium, Appium, or similar 
+technologies 
+Collaborate with cross-functional teams to identify test requirements and develop test plans 
+Execute automated tests and analyze results to identify defects 
+Work with developers to troubleshoot and resolve issues 
+Develop and maintain automation frameworks and tools 
+Shared by Job Curator - Join us on Telegram: https://t.me/testingexperiencedopenings   
+General 
+General 
+Shared by Job Curator - Join us on Telegram:  https://t.me/testingexperiencedopenings   
+This document is for Subscribed Members only. If you notice this is shared publicly by anyone  
+pls report to us on info@jobcurator.in or whatsapp +91 9014875399 
+Requirements: 
+Strong knowledge of programming languages like Java, Python, or C# 
+Experience with automation testing tools like Selenium, Appium, or similar technologies 
+Familiarity with Agile methodologies and version control systems like Git 
+Excellent analytical and problem-solving skills 
+If you're passionate about automation testing and want to grow with us, send your resume 
+to: 
+manisha@vurramtechnologies.com 
+================= 
+Are you a QA Automation Engineer with Playwright experience? 
+Perficient India is hiring #QAEngineer with #Playwright experience. 
+If you are or know someone with this experience and #immediate joiner, please DM/ share 
+profiles to nagapushpam.munagala@perficient.com 
+Job Title: QA Automation Testing 
+Location: #Hyderabad / #Bengaluru / #Chennai / #Pune / #Nagpur 
+Job Type: Full-time 
+Exp: 5+ yrs 
+Notice Period: IMMEDIATE JOINERS - 10 DAYS ONLY 
+Interview Mode: 1 technical round F2F is Mandatory at any above mentioned location. 
+Mandatory Skills: Java, Selenium, Playwright, Rest Assured (API Automation) 
+================= 
+We’re Hiring: SDET (Python + Selenium) 
+Join our team and help us deliver high-quality software through innovative automation 
+solutions! 
+Key Skills: Python, Selenium, Pytest, API Testing, CI/CD 
+Location: Hyderabad / Chennai 
+If you or someone you know fits this role, DM me or share your profile at 
+meghanath.madur@innovasolutions.com 
+============== 
+STAFI is Hiring! 
+We’re looking for a Senior Software Development Engineer in Test (SDET) to join our 
+mission of delivering Quick. Accurate. Reliable. tech solutions. 
+If you have strong Java + Selenium, API Testing, SQL/DB testing, and hands-on Git & Agile 
+experience, this opportunity is for you. 
+�
+� Location: Hyderabad 
+�
+� Apply now: jobs@stafi.in 
+============== 
+We are Hiring QA Automation Engineer (Python) 
+Shared by Job Curator - Join us on Telegram: https://t.me/testingexperiencedopenings   
+General 
+General 
+Shared by Job Curator - Join us on Telegram:  https://t.me/testingexperiencedopenings   
+This document is for Subscribed Members only. If you notice this is shared publicly by anyone  
+pls report to us on info@jobcurator.in or whatsapp +91 9014875399 
+Work Location: Hyderabad 
+No. of openings: 1 
+Exp: 5 Years 
+Expected Start: Immediate 
+Role Summary: 
+Automate testing using Python via existing proprietary framework. Validate 
+services/data/models across end-to-end flows. 
+Tech Stack: 
+Python automation leveraging internal framework. Integration testing across Angular FE and 
+Java/Kubernetes BE. DB validation on MySQL/MongoDB. 
+Key Responsibilities: 
+1. Author robust automated tests for APIs, data integrity, and UI workflows. 2. Establish test 
+data strategies aligned to deep configuration layers. 
+3. Integrate with CI pipelines. Report defects with clear reproduction paths. 4. Drive quality 
+gates for the Pilot Feature and beyond. 
+Must-Have Qualifications: 
+1. Senior-level Python test automation; experience with enterprise frameworks (custom or 
+open-source). 
+2. Strong in service-level testing, database validation, and flaky test mitigation. 
+3. Collaborates across BA/FE/BE for front-to-back delivery. 
+Nice-to-Have 
+Contract testing, and data migration validation. 
+If you think you are the right fit, or you know someone who is, please share your resumes 
+out to us at info@fusionfoundry.com 
+================= 
+Title: SDET/Automation Specialist 
+Job Description:- 
+Experience: 7+ years in SDET/Test Automation 
+Location: India ( Hyderabad/Bangalore ) WFO  
+Summary 
+Seeking a seasoned SDET who has significant working experience building end-to-end test 
+automation covering Integration, UAT & Regression across UI, API, backend Java/J2EE 
+applications. The role emphasizes framework design from scratch, rigorous UAT & 
+Regression automation, Jira-driven lifecycle management.  
+Key Responsibilities 
+Design, implement, and maintain automated tests for UI, API, UAT, Regression  
+Build regression automation suites from scratch for Java/J2EE systems from scratch; assess 
+Shared by Job Curator - Join us on Telegram: https://t.me/testingexperiencedopenings   
+General 
+General 
+Shared by Job Curator - Join us on Telegram:  https://t.me/testingexperiencedopenings   
+This document is for Subscribed Members only. If you notice this is shared publicly by anyone  
+pls report to us on info@jobcurator.in or whatsapp +91 9014875399 
+application architecture and select industry-standard tooling. 
+Author In-Sprint UAT, Regression automation scenarios aligned to business workflows; 
+collaborate with product owners and SMEs to define acceptance criteria and traceability. 
+Establish automation standards: coding conventions, test data strategies, environment 
+parity, and reliable mocks/stubs. 
+Integrate automation into CI/CD pipelines; ensure fast, reliable feedback with parallelization 
+and flaky test remediation. 
+Develop API test automation: contract testing, schema validation, negative paths, 
+performance baselines, and data-driven cases. 
+Own Jira-based test lifecycle: requirements mapping, test case management, execution 
+tracking, defect triage, coverage reporting, and dashboards. 
+Create and execute SQL queries for database verification, referential integrity checks, and 
+back-end assertions. 
+Partner with developers to reproduce, isolate, and resolve defects; provide clear, actionable 
+bug reports with logs and reproduction steps. 
+Mentor team members on automation best practices, tooling, and UAT methodology; 
+advocate for AI-assisted testing where impactful. 
+Collaborate cross-functionally to ensure environmental readiness, test data management, 
+and alignment with release schedules. 
+Continuously improve :identify gaps, reduce manual effort, and enhance reliability through 
+refactoring and tooling upgrades. 
+Required Skills 
+Framwork(s): POM, Cucumber(BDD) 
+Tools: Cypress, Selenium, Playwright 
+API automation expertise: RESTFul API, Postman 
+Programming: Java/J2EE and Python for robust, maintainable test code. 
+Strong understanding of software testing methodologies and UAT processes. 
+Jira test lifecycle management, dashboards, and traceability. 
+SQL proficiency for database validation and complex joins. 
+Analytical and problem-solving skills; root cause analysis for defects. 
+Excellent communication with stakeholders, developers, and business users. 
+Attention to detail in designing, executing, and documenting test cases. 
+Education 
+Bachelor's in Computer Science, Engineering, or related field; or equivalent experience. 
+Nice to Have 
+Exposure to performance testing and security test considerations. 
+Interested Candidates can drop their resumes @ mitali.rani@altezzasys.com 
+================= 
+We are hiring for “QA Engineer – Embedded & SoC Testing ” 
+Experience: 2+ Years 
+Location: Hyderabad 
+Notice Period: Immediate Joiner and Currently Serving. 
+Job description: - 
+Shared by Job Curator - Join us on Telegram: https://t.me/testingexperiencedopenings   
+General 
+General 
+Shared by Job Curator - Join us on Telegram:  https://t.me/testingexperiencedopenings   
+This document is for Subscribed Members only. If you notice this is shared publicly by anyone  
+pls report to us on info@jobcurator.in or whatsapp +91 9014875399 ->Strong embedded systems & microprocessor fundamentals ->Knowledge of SoC blocks: CPU, Modem, RF, PA, PMIC, Display, Graphics, Camera ->Understanding of Linux/RTOS concepts ->Experience with debugging tools (JTAG, oscilloscope, logic analyzer) ->Familiarity with power/thermal frameworks & multimedia systems ->Basic programming (Python preferred) 
+Kindly share your updated resume to preeti@skygate.co.in 
+================= 
+�
+� Hiring: Automation Test Engineer 
+�
+� Location: Hyderabad | Bengaluru | Chennai 
+�
+� Experience: 5–10 Years 
+�
+� Employment Type: Full-Time | Onsite 
+�
+� About the Role 
+We are seeking a skilled Automation Test Engineer who is strong in Java & Selenium to 
+ensure top-notch product quality. If automation, scripting, and problem-solving excite you 
+— this role is for you! 
+�
+� Required Skills 
+✔ Strong experience in Automation Testing 
+✔ Expertise in Java programming 
+✔ Hands-on experience with Selenium WebDriver 
+✔ Experience with TestNG / JUnit 
+✔ Familiarity with CI/CD tools (Jenkins, Git, etc.) 
+✔ Knowledge of API Testing is a plus 
+✔ Good understanding of SDLC & STLC 
+�
+� Responsibilities 
+�
+� Design, develop & execute automation test scripts 
+�
+� Identify bugs and ensure high product quality 
+�
+� Collaborate with cross-functional teams 
+�
+� Maintain automation frameworks 
+�
+� Generate detailed test reports
