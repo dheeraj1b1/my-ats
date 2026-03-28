@@ -1,10 +1,6 @@
 name: 🔍 Automated Job Scout
 
 on:
-  push:
-    branches: [feature/jobCurator]
-  pull_request:
-    branches: [feature/jobCurator]
   schedule:
     # Runs every 12 hours (midnight and noon UTC)
     - cron: '0 */12 * * *'

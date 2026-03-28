@@ -6,9 +6,13 @@ import datetime
 import pytz
 import requests
 import pandas as pd
+import re
+import os
+import base64
 import importlib.util
 import sys
 from pathlib import Path
+from email.mime.text import MIMEText
 from supabase import create_client, Client
 
 from tailor import (
@@ -140,6 +144,7 @@ with st.sidebar:
             "✂️ Resume Studio",
             "📄 Job Curator",
             "☁️ Document Vault",
+            "📧 Mail Drafter",
         ],
         key="nav_radio",
     )
@@ -1274,3 +1279,249 @@ elif page == "☁️ Document Vault":
                         st.error(f"Failed to delete files: {e}")
                 else:
                     st.info("No files selected for deletion.")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 📧 MAIL DRAFTER — AI Cold Outreach Email Generator + Gmail Drafts
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "📧 Mail Drafter":
+    st.header("📧 Mail Drafter")
+    st.caption("Draft professional cold outreach emails for 'Not Applied' jobs and save them to Gmail Drafts.")
+
+    if not airtable_base_id or not airtable_token:
+        st.warning("⚠️ Airtable credentials are required. Set them in the sidebar.")
+    else:
+        # ── Fetch 'Not Applied' jobs from Airtable ──
+        @st.cache_data(ttl=60, show_spinner="Fetching 'Not Applied' jobs...")
+        def fetch_not_applied_for_mail(_base_id, _token):
+            url = f"https://api.airtable.com/v0/{_base_id}/Applications"
+            headers = {"Authorization": f"Bearer {_token}"}
+            all_records = []
+            offset = None
+            while True:
+                params = {"filterByFormula": "{Status} = 'Not Applied'"}
+                if offset:
+                    params["offset"] = offset
+                resp = requests.get(url, headers=headers, params=params, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+                for rec in data.get("records", []):
+                    fields = rec.get("fields", {})
+                    all_records.append({
+                        "record_id": rec.get("id", ""),
+                        "Company": fields.get("Company", ""),
+                        "Role": fields.get("Role", ""),
+                        "JD Description": fields.get("JD Description", ""),
+                        "Apply Link": fields.get("Apply Link", ""),
+                    })
+                offset = data.get("offset")
+                if not offset:
+                    break
+            return all_records
+
+        if st.button("🔄 Refresh Jobs", key="mail_refresh"):
+            fetch_not_applied_for_mail.clear()
+            st.rerun()
+
+        try:
+            mail_jobs = fetch_not_applied_for_mail(airtable_base_id, airtable_token)
+        except Exception as e:
+            st.error(f"Failed to fetch Airtable records: {e}")
+            mail_jobs = []
+
+        if not mail_jobs:
+            st.info("No 'Not Applied' jobs found in Airtable. Run the Scout pipeline first.")
+        else:
+            job_labels = [f"{j['Company']} — {j['Role']}" for j in mail_jobs]
+            selected_idx = st.selectbox(
+                "Select a job to draft an email for:",
+                range(len(job_labels)),
+                format_func=lambda i: job_labels[i],
+                key="mail_job_select",
+            )
+
+            selected_job = mail_jobs[selected_idx]
+            jd_desc = selected_job.get("JD Description", "")
+
+            # ── Extract recruiter email from JD Description ──
+            recruiter_email = ""
+            email_match = re.search(r'Recruiter:\s*([\w.+-]+@[\w-]+\.[\w.-]+)', jd_desc)
+            if email_match:
+                recruiter_email = email_match.group(1)
+
+            # ── Show job details ──
+            st.subheader(f"{selected_job['Company']} — {selected_job['Role']}")
+
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                st.markdown(f"**Company:** {selected_job['Company']}")
+                st.markdown(f"**Role:** {selected_job['Role']}")
+                if recruiter_email:
+                    st.success(f"📧 Recruiter Email: **{recruiter_email}**")
+                else:
+                    st.warning("⚠️ No recruiter email found in JD Description")
+            with col2:
+                if selected_job.get("Apply Link"):
+                    st.markdown(f"🔗 **[Apply Link]({selected_job['Apply Link']})**")
+
+            with st.expander("📋 JD Description Preview", expanded=False):
+                if jd_desc:
+                    st.text(jd_desc[:2000])
+                else:
+                    st.info("No JD Description available.")
+
+            # ── Model call counters (session-scoped) ──
+            if "mail_model2_calls" not in st.session_state:
+                st.session_state["mail_model2_calls"] = 0
+            if "mail_model3_calls" not in st.session_state:
+                st.session_state["mail_model3_calls"] = 0
+
+            # ── Draft Email Button ──
+            if st.button("✍️ Draft Email", key="mail_draft_btn"):
+                if not api_key:
+                    st.warning("Please enter your Gemini API Key in the sidebar.")
+                elif not jd_desc:
+                    st.warning("No JD Description available for this job.")
+                else:
+                    # Load resume.txt
+                    resume_text = ""
+                    resume_path = os.path.join(os.path.dirname(__file__), "resume.txt")
+                    if os.path.exists(resume_path):
+                        with open(resume_path, "r", encoding="utf-8") as f:
+                            resume_text = f.read().strip()
+                    else:
+                        st.warning("⚠️ resume.txt not found. Drafting without resume context.")
+
+                    email_prompt = f"""You are a professional email writer for job applications.
+Write a short, professional cold outreach email for the following job.
+
+Rules:
+- Maximum 150 words
+- Mention the role "{selected_job['Role']}" and company "{selected_job['Company']}" by name
+- Highlight 2-3 relevant skills from the resume that match the job description
+- End with a clear call to action asking them to review the attached resume
+- Include a subject line at the top in the format: Subject: [subject text]
+- Tone: confident, concise, and professional
+- Do NOT use placeholder brackets like [Your Name] — use "Dheeraj" as the name
+
+Job Description:
+{jd_desc[:3000]}
+
+Resume:
+{resume_text[:3000]}
+"""
+
+                    genai.configure(api_key=api_key)
+                    drafted_email = None
+
+                    with st.spinner("🤖 Drafting email with AI..."):
+                        # Attempt 1: Primary Model
+                        try:
+                            st.toast("🚀 Using Model 1: gemini-3.1-flash-lite-preview")
+                            model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
+                            response = model.generate_content(email_prompt)
+                            drafted_email = response.text
+                        except Exception as e1:
+                            st.toast(f"⚠️ Model 1 failed: {e1}")
+
+                            # Attempt 2: Fallback Model 2
+                            if st.session_state["mail_model2_calls"] < 19:
+                                try:
+                                    st.toast("🔄 Using Model 2: gemini-2.5-flash")
+                                    model = genai.GenerativeModel("gemini-2.5-flash")
+                                    response = model.generate_content(email_prompt)
+                                    drafted_email = response.text
+                                except Exception as e2:
+                                    st.toast(f"❌ Model 2 failed: {e2}")
+                                finally:
+                                    st.session_state["mail_model2_calls"] += 1
+                            else:
+                                st.toast("⚠️ Model 2 limit (19) reached.")
+
+                            # Attempt 3: Fallback Model 3
+                            if drafted_email is None and st.session_state["mail_model3_calls"] < 19:
+                                try:
+                                    st.toast("🔄 Using Model 3: gemini-2.0-flash")
+                                    model = genai.GenerativeModel("gemini-2.0-flash")
+                                    response = model.generate_content(email_prompt)
+                                    drafted_email = response.text
+                                except Exception as e3:
+                                    st.toast(f"❌ Model 3 failed: {e3}")
+                                finally:
+                                    st.session_state["mail_model3_calls"] += 1
+                            elif drafted_email is None:
+                                st.toast("⚠️ Model 3 limit (19) reached.")
+
+                    if drafted_email:
+                        st.session_state["drafted_email"] = drafted_email
+                        st.session_state["draft_recruiter_email"] = recruiter_email
+                    else:
+                        st.error("❌ All models exhausted. Could not draft email.")
+
+            # ── Show drafted email for editing ──
+            if "drafted_email" in st.session_state:
+                st.subheader("📝 Drafted Email")
+                edited_email = st.text_area(
+                    "Edit the drafted email below:",
+                    value=st.session_state["drafted_email"],
+                    height=350,
+                    key="mail_email_editor",
+                )
+
+                draft_to = st.session_state.get("draft_recruiter_email", "")
+                if draft_to:
+                    st.info(f"📧 To: **{draft_to}**")
+                else:
+                    st.warning("⚠️ No recruiter email found in JD Description. You can manually enter one below.")
+                    draft_to = st.text_input("Enter recruiter email:", key="mail_manual_email")
+
+                # ── Save to Gmail Drafts ──
+                if st.button("📨 Save to Gmail Drafts", key="mail_gmail_btn"):
+                    if not draft_to:
+                        st.error("❌ No recruiter email provided. Cannot create Gmail draft.")
+                    else:
+                        try:
+                            import json
+                            from google.oauth2.credentials import Credentials
+                            from googleapiclient.discovery import build
+
+                            creds_dict = json.loads(st.secrets["GMAIL_CREDENTIALS"])
+                            creds = Credentials(
+                                token=creds_dict.get("token"),
+                                refresh_token=creds_dict.get("refresh_token"),
+                                token_uri=creds_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
+                                client_id=creds_dict.get("client_id"),
+                                client_secret=creds_dict.get("client_secret"),
+                                scopes=creds_dict.get("scopes", ["https://www.googleapis.com/auth/gmail.compose"]),
+                            )
+
+                            service = build("gmail", "v1", credentials=creds)
+
+                            # Extract subject line from email body
+                            email_body = edited_email
+                            subject = "Job Application"
+                            subject_match = re.search(r'Subject:\s*(.+)', edited_email)
+                            if subject_match:
+                                subject = subject_match.group(1).strip()
+                                # Remove subject line from body
+                                email_body = edited_email.replace(subject_match.group(0), "").strip()
+
+                            message = MIMEText(email_body)
+                            message["to"] = draft_to
+                            message["subject"] = subject
+
+                            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+
+                            draft = service.users().drafts().create(
+                                userId="me",
+                                body={"message": {"raw": raw_message}}
+                            ).execute()
+
+                            st.success(f"✅ Draft saved to Gmail! (Draft ID: {draft['id']})")
+                            st.balloons()
+
+                        except KeyError:
+                            st.error("❌ GMAIL_CREDENTIALS not found in Streamlit secrets. Add OAuth credentials to .streamlit/secrets.toml")
+                        except Exception as e:
+                            st.error(f"❌ Failed to save Gmail draft: {e}")

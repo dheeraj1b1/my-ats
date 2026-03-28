@@ -290,40 +290,60 @@ def scrape_google_jobs(serpapi_key):
         "api_key": serpapi_key,
     }
 
-    try:
-        url = "https://serpapi.com/search"
-        resp = requests.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        print(f"   ⚠️ Failed to fetch SerpAPI: {e}")
-        return []
+    url = "https://serpapi.com/search"
+    max_pages = 3
 
-    for job in data.get("jobs_results", []):
-        title = job.get("title", "Unknown")
-        company = job.get("company_name", "Unknown")
-        description = job.get("description", "")
+    for page in range(max_pages):
+        print(f"   📄 Fetching page {page + 1}/{max_pages}...")
 
-        apply_link = ""
-        options = job.get("apply_options", [])
-        if options:
-            apply_link = options[0].get("link", "")
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            print(f"   ⚠️ Failed to fetch SerpAPI page {page + 1}: {e}")
+            break
 
-        if len(description) < 200:
-            continue
+        jobs_results = data.get("jobs_results", [])
+        if not jobs_results:
+            print(f"   ⚠️ No results on page {page + 1}. Stopping.")
+            break
 
-        if any(d in apply_link.lower() for d in bad_domains):
-            continue
+        for job in jobs_results:
+            title = job.get("title", "Unknown")
+            company = job.get("company_name", "Unknown")
+            description = job.get("description", "")
 
-        all_jobs.append({
-            "title": title,
-            "company": company,
-            "apply_link": apply_link,
-            "city": "Bangalore",
-            "source": "google",
-            "description": description
-        })
-        print(f"   ✅ {title} at {company} — {len(description)} chars")
+            apply_link = ""
+            options = job.get("apply_options", [])
+            if options:
+                apply_link = options[0].get("link", "")
+
+            if len(description) < 200:
+                continue
+
+            if any(d in apply_link.lower() for d in bad_domains):
+                continue
+
+            all_jobs.append({
+                "title": title,
+                "company": company,
+                "apply_link": apply_link,
+                "city": "Bangalore",
+                "source": "google",
+                "description": description
+            })
+            print(f"   ✅ {title} at {company} — {len(description)} chars")
+
+        # Check for next page token
+        pagination = data.get("serpapi_pagination", {})
+        next_token = pagination.get("next_page_token")
+        if not next_token:
+            print(f"   ℹ️ No more pages available.")
+            break
+
+        params["next_page_token"] = next_token
+        time.sleep(1)
 
     print(f"\n✅ Total valid Google jobs scraped: {len(all_jobs)}")
     return all_jobs
