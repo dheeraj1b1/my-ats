@@ -278,71 +278,53 @@ def scrape_google_jobs(serpapi_key):
 
     all_jobs = []
     print("\n🔎 Scraping jobs from Google (via SerpAPI)...")
-    
+
     bad_domains = [
-        "linkedin.com", "shine.com", "timesjobs.com", "monster.com", 
+        "linkedin.com", "shine.com", "timesjobs.com", "monster.com",
         "freshersworld.com", "placementindia.com", "hirist.com", "instahyre.com"
     ]
-    
-    for start in [0, 10, 20]:
-        if len(all_jobs) >= 80:
-            break
-            
-        params = {
-            "engine": "google_jobs",
-            "q": "SDET OR QA Automation Engineer Bangalore",
-            "api_key": serpapi_key,
-            "num": 10,
-            "start": start
-        }
-        
-        try:
-            resp = requests.get("https://serpapi.com/search", params=params, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            print(f"   ⚠️ Failed to fetch SerpAPI page {start}: {e}")
-            break
-            
-        jobs_results = data.get("jobs_results", [])
-        if not jobs_results:
-            break
-            
-        for job in jobs_results:
-            if len(all_jobs) >= 80:
-                break
-                
-            title = job.get("title", "Unknown")
-            company = job.get("company_name", "Unknown")
-            description = job.get("description", "")
-            
-            apply_link = ""
-            apply_options = job.get("apply_options", [])
-            if apply_options and isinstance(apply_options, list):
-                apply_link = apply_options[0].get("link", "")
-                
-            if not apply_link:
-                continue
-                
-            if any(domain in apply_link.lower() for domain in bad_domains):
-                continue
-                
-            if len(description) < 200:
-                print(f"   ⏭️ Skipping {title} — description too short ({len(description)} chars)")
-                continue
-                
-            all_jobs.append({
-                "title": title,
-                "company": company,
-                "apply_link": apply_link,
-                "city": "Bangalore",
-                "source": "google",
-                "description": description
-            })
-            print(f"   ✅ {title} at {company} — {len(description)} chars")
-            
-        time.sleep(1)
-        
+
+    params = {
+        "engine": "google_jobs",
+        "q": "SDET OR QA Automation Engineer OR Test Automation Engineer Bangalore",
+        "api_key": serpapi_key,
+    }
+
+    try:
+        url = "https://serpapi.com/search"
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"   ⚠️ Failed to fetch SerpAPI: {e}")
+        return []
+
+    for job in data.get("jobs_results", []):
+        title = job.get("title", "Unknown")
+        company = job.get("company_name", "Unknown")
+        description = job.get("description", "")
+
+        apply_link = ""
+        options = job.get("apply_options", [])
+        if options:
+            apply_link = options[0].get("link", "")
+
+        if len(description) < 200:
+            continue
+
+        if any(d in apply_link.lower() for d in bad_domains):
+            continue
+
+        all_jobs.append({
+            "title": title,
+            "company": company,
+            "apply_link": apply_link,
+            "city": "Bangalore",
+            "source": "google",
+            "description": description
+        })
+        print(f"   ✅ {title} at {company} — {len(description)} chars")
+
     print(f"\n✅ Total valid Google jobs scraped: {len(all_jobs)}")
     return all_jobs
 
