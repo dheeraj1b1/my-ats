@@ -291,7 +291,6 @@ def scrape_google_jobs(serpapi_key):
         params = {
             "engine": "google_jobs",
             "q": "SDET OR QA Automation Engineer Bangalore",
-            "location": "Bangalore Karnataka India",
             "api_key": serpapi_key,
             "num": 10,
             "start": start
