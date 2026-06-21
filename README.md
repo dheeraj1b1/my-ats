@@ -83,7 +83,7 @@ my-ats/
 ├── scout_requirements.txt        # Lightweight scout-only dependencies
 ├── test_scout_refactor.py        # Unit tests for scout filtering logic
 ├── test_tailor.py                # Unit tests for DOCX parsing and tailoring
-├── ARCHITECTURE.md              # Full technical architecture document
+├── ARCHITECTURE.md               # Full technical architecture document
 ├── .github/
 │   └── workflows/
 │       └── scout.yml             # GitHub Actions: runs scout.py every 12 hours
@@ -165,14 +165,20 @@ LinkedIn Jobs
 
 ```bash
 pip install -r requirements.txt
+```
 
-# Add credentials to .streamlit/secrets.toml:
-# [secrets]
-# GEMINI_API_KEY = "..."
-# AIRTABLE_TOKEN = "..."
-# SUPABASE_URL = "..."
-# SUPABASE_KEY = "..."
+Create `.streamlit/secrets.toml` with your credentials:
 
+```toml
+GEMINI_API_KEY = "..."
+AIRTABLE_TOKEN = "..."
+SUPABASE_URL = "..."
+SUPABASE_KEY = "..."
+```
+
+Then run:
+
+```bash
 streamlit run app.py
 ```
 
